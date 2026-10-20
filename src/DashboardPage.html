@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<!-- Overview dashboard (design reference: Google Stitch export). Served by doGet() in Dashboard.js; data from getDashboardData(). -->
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+<style>
+  /* Colour tokens from the Stitch palette (light, the default) and a matching dark set. Values are RGB triplets so
+     Tailwind opacity modifiers (bg-surface-container-low/40) keep working in both themes. */
+  :root {
+    --background: 250 248 255; --surface-container-lowest: 255 255 255; --surface-container-low: 242 243 255;
+    --surface-container: 234 237 255; --surface-container-high: 226 231 255;
+    --on-surface: 19 27 46; --on-surface-variant: 69 71 76;
+    --primary: 9 20 38; --on-primary: 255 255 255; --inverse-surface: 40 48 68;
+    --primary-fixed: 216 227 251; --on-primary-fixed: 17 28 45;
+    --secondary: 0 81 213; --on-secondary: 255 255 255;
+    --secondary-fixed: 219 225 255; --secondary-fixed-dim: 180 197 255;
+    --on-secondary-fixed: 0 23 75; --on-secondary-fixed-variant: 0 62 168;
+    --tertiary-fixed: 151 245 204; --tertiary-fixed-dim: 123 216 177;
+    --on-tertiary-fixed-variant: 0 81 58; --on-tertiary-container: 65 160 124;
+    --error: 186 26 26; --error-container: 255 218 214; --on-error-container: 147 0 10;
+    --outline: 117 119 125; --outline-variant: 197 198 205;
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --background: 13 17 27; --surface-container-lowest: 20 25 38; --surface-container-low: 27 33 49;
+    --surface-container: 33 40 58; --surface-container-high: 41 49 70;
+    --on-surface: 226 230 243; --on-surface-variant: 168 174 190;
+    --primary: 216 227 251; --on-primary: 13 22 40; --inverse-surface: 188 199 222;
+    --primary-fixed: 36 48 74; --on-primary-fixed: 216 227 251;
+    --secondary: 157 182 255; --on-secondary: 0 33 94;
+    --secondary-fixed: 30 47 96; --secondary-fixed-dim: 44 66 128;
+    --on-secondary-fixed: 219 225 255; --on-secondary-fixed-variant: 180 197 255;
+    --tertiary-fixed: 16 61 45; --tertiary-fixed-dim: 30 90 68;
+    --on-tertiary-fixed-variant: 151 245 204; --on-tertiary-container: 92 196 155;
+    --error: 255 180 171; --error-container: 92 21 18; --on-error-container: 255 218 214;
+    --outline: 142 147 160; --outline-variant: 58 65 82;
+    color-scheme: dark;
+  }
+  html, body { margin: 0; padding: 0; }
+  body { overscroll-behavior: none; background: rgb(var(--background)); }
+  main > :first-child { margin-top: 0 !important; }
+  main > :last-child { margin-bottom: 0 !important; }
+  ::-webkit-scrollbar { display: none; }
+  /* Controls kept from the design whose feature does not exist yet. */
+  .ft-off { opacity: .45; cursor: not-allowed !important; }
+  .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+</style>
+<script src="https://cdn.tailwindcss.com/3.4.16"></script>
+<script>
+  (function () {
+    var c = function (v) { return 'rgb(var(--' + v + ') / <alpha-value>)'; };
+    var names = ['background', 'surface-container-lowest', 'surface-container-low', 'surface-container', 'surface-container-high',
+      'on-surface', 'on-surface-variant', 'primary', 'on-primary', 'inverse-surface', 'primary-fixed', 'on-primary-fixed',
+      'secondary', 'on-secondary', 'secondary-fixed', 'secondary-fixed-dim', 'on-secondary-fixed', 'on-secondary-fixed-variant',
+      'tertiary-fixed', 'tertiary-fixed-dim', 'on-tertiary-fixed-variant', 'on-tertiary-container',
+      'error', 'error-container', 'on-error-container', 'outline', 'outline-variant'];
+    var colors = {};
+    names.forEach(function (n) { colors[n] = c(n); });
+    tailwind.config = {
+      theme: { extend: {
+        colors: colors,
+        borderRadius: { DEFAULT: '0.125rem', lg: '0.25rem', xl: '0.5rem', full: '0.75rem' },
+        spacing: { 'space-xl': '2rem', 'gutter-desktop': '1.5rem', margin: '1rem', 'margin-desktop': '2rem', 'space-sm': '0.5rem',
+          'space-xs': '0.25rem', 'space-md': '0.75rem', gutter: '1rem', 'space-lg': '1.25rem' },
+        fontFamily: { 'headline-sm': ['Inter'], 'label-md': ['Inter'], 'label-sm': ['Inter'], 'body-md': ['Inter'],
+          'body-sm': ['Inter'], 'headline-lg': ['Inter'], 'data-mono': ['Inter'] },
+        fontSize: {
+          'label-md': ['0.8125rem', { lineHeight: '1.125rem', letterSpacing: '0.01em', fontWeight: '500' }],
+          'headline-sm': ['1rem', { lineHeight: '1.5rem', letterSpacing: '-0.01em', fontWeight: '600' }],
+          'label-sm': ['0.6875rem', { lineHeight: '1rem', letterSpacing: '0.04em', fontWeight: '600' }],
+          'body-md': ['0.875rem', { lineHeight: '1.375rem', letterSpacing: '0em', fontWeight: '400' }],
+          'headline-lg': ['1.75rem', { lineHeight: '2.25rem', letterSpacing: '-0.025em', fontWeight: '600' }],
+          'body-sm': ['0.8125rem', { lineHeight: '1.25rem', letterSpacing: '0.005em', fontWeight: '400' }],
+          'data-mono': ['0.8125rem', { lineHeight: '1.125rem', letterSpacing: '-0.01em', fontWeight: '500' }]
+        }
+      } }
+    };
+    // Light by default; a saved choice wins. Storage can be unavailable in the web-app frame, so every access is guarded.
+    try { if (localStorage.getItem('ft-theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark'); } catch (e) {}
+  })();
+</script>
+</head>
+<body class="bg-background font-body-md text-body-md text-on-surface antialiased">
+
+<!-- Sidebar. Fixed from the very top (top-0): the Stitch export's body pt-4 + top-4 left a 16px band that content
+     scrolled through and pushed the sidebar footer 16px below the viewport. -->
+<aside class="hidden lg:flex fixed top-0 left-0 h-screen w-64 bg-surface-container-lowest border-r border-outline-variant/30 z-50 flex-col justify-between">
+  <div class="flex flex-col">
+    <div class="h-16 px-space-md flex items-center gap-space-sm border-b border-outline-variant/20">
+      <div class="h-8 w-8 rounded-lg bg-primary text-on-primary flex items-center justify-center"><span class="material-symbols-outlined text-[18px]">flight_land</span></div>
+      <div class="flex flex-col min-w-0">
+        <span class="font-headline-sm text-headline-sm text-primary tracking-tight truncate leading-none">Flight Tracker</span>
+        <span class="font-label-sm text-label-sm text-secondary uppercase font-bold tracking-wider mt-0.5"><span data-f="home">BLR</span> Operations</span>
+      </div>
+    </div>
+    <div class="px-space-md py-space-sm"><span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant/70 px-space-xs">Navigation</span></div>
+    <nav class="flex flex-col gap-space-xs px-space-sm">
+      <a aria-current="page" class="flex items-center gap-space-sm px-space-sm py-2 bg-primary text-on-primary font-label-md text-label-md rounded-lg shadow-sm" href="#"><span class="material-symbols-outlined text-[18px]">dashboard</span><span>Overview</span></a>
+      <a aria-disabled="true" tabindex="-1" title="Not available yet: use the Flights sheet" class="ft-off flex items-center gap-space-sm px-space-sm py-2 rounded-lg text-on-surface-variant font-label-md text-label-md"><span class="material-symbols-outlined text-[18px]">flight</span><span>Flights</span></a>
+      <a aria-disabled="true" tabindex="-1" title="Not available yet: use the Groups sheet" class="ft-off flex items-center gap-space-sm px-space-sm py-2 rounded-lg text-on-surface-variant font-label-md text-label-md"><span class="material-symbols-outlined text-[18px]">directions_car</span><span>Cab Groups</span></a>
+      <a aria-disabled="true" tabindex="-1" title="Not available yet: see the Log sheet" class="ft-off flex items-center gap-space-sm px-space-sm py-2 rounded-lg text-on-surface-variant font-label-md text-label-md"><span class="material-symbols-outlined text-[18px]">notifications</span><span>Notifications</span></a>
+      <a aria-disabled="true" tabindex="-1" title="Not available yet: see the API Usage sheet" class="ft-off flex items-center gap-space-sm px-space-sm py-2 rounded-lg text-on-surface-variant font-label-md text-label-md"><span class="material-symbols-outlined text-[18px]">terminal</span><span>API Usage</span></a>
+      <a aria-disabled="true" tabindex="-1" title="Not available yet: use the Config sheet" class="ft-off flex items-center gap-space-sm px-space-sm py-2 rounded-lg text-on-surface-variant font-label-md text-label-md"><span class="material-symbols-outlined text-[18px]">tune</span><span>Settings</span></a>
+    </nav>
+  </div>
+  <div class="p-space-sm border-t border-outline-variant/20 bg-surface-container-low/40">
+    <div class="flex items-center justify-between px-space-xs py-1">
+      <div class="flex items-center gap-1.5"><span id="engine-dot" class="w-2 h-2 rounded-full bg-outline"></span><span id="engine-label" class="font-label-sm text-label-sm text-on-surface font-medium">Engine status…</span></div>
+      <span class="font-data-mono text-on-surface-variant/80 text-[10px]">5m tick</span>
+    </div>
+    <div class="flex items-center justify-between px-space-xs pt-1 border-t border-outline-variant/10">
+      <span class="font-label-sm text-label-sm text-on-surface-variant">Zone</span>
+      <span class="font-data-mono text-data-mono text-on-surface-variant font-medium">Asia/Kolkata (IST)</span>
+    </div>
+  </div>
+</aside>
+
+<div class="lg:pl-64 flex flex-col min-h-screen">
+  <header class="fixed top-0 left-0 lg:left-64 right-0 h-16 bg-surface-container-lowest/90 backdrop-blur-md border-b border-outline-variant/30 z-40 px-gutter flex items-center justify-between">
+    <div class="flex flex-col min-w-0">
+      <span class="font-headline-sm text-headline-sm text-primary leading-tight">Flight Operations</span>
+      <span class="font-body-sm text-body-sm text-on-surface-variant hidden sm:inline truncate">Monitor arrivals, departures, and airport transfers</span>
+    </div>
+    <div class="flex items-center gap-space-md">
+      <div class="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded bg-surface-container-low border border-outline-variant/40" title="Date selection is not available yet">
+        <span class="material-symbols-outlined text-[16px] text-on-surface-variant">calendar_today</span>
+        <span id="today" class="font-data-mono text-data-mono text-on-surface font-medium">Today</span>
+        <span class="material-symbols-outlined text-[16px] text-on-surface-variant ft-off">expand_more</span>
+      </div>
+      <div id="sync-chip" class="hidden lg:flex items-center gap-1.5 px-2 py-0.5 rounded bg-tertiary-fixed/20 border border-tertiary-fixed-dim/40 text-on-tertiary-fixed-variant">
+        <span id="sync-dot" class="w-1.5 h-1.5 rounded-full bg-on-tertiary-container"></span>
+        <span id="sync-label" class="font-label-sm text-label-sm uppercase font-semibold">Live Syncing (OpenSky / ADB)</span>
+      </div>
+      <div class="flex items-center gap-space-xs text-on-surface-variant">
+        <span id="synced-ago" class="font-data-mono text-data-mono hidden xl:inline">Loading…</span>
+        <button data-refresh class="p-1.5 rounded hover:bg-surface-container-high hover:text-on-surface transition-colors" title="Refresh data" type="button"><span class="material-symbols-outlined text-[18px]">refresh</span></button>
+        <button id="theme-toggle-btn" class="p-1.5 rounded hover:bg-surface-container-high hover:text-on-surface transition-colors flex items-center justify-center" title="Toggle theme" aria-label="Toggle dark mode" type="button"><span id="theme-icon" class="material-symbols-outlined text-[18px]">dark_mode</span></button>
+      </div>
+      <div class="h-5 w-px bg-outline-variant/30 hidden sm:block"></div>
+      <div class="flex items-center gap-space-sm pl-space-xs" title="Sign-in is not available yet">
+        <div class="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center ring-1 ring-outline-variant/40 ft-off"><span class="material-symbols-outlined text-[18px] text-on-surface-variant">person</span></div>
+        <div class="hidden md:flex flex-col min-w-0 text-left ft-off">
+          <span class="font-label-md text-label-md text-on-surface leading-tight">Coordinator</span>
+          <span class="font-label-sm text-label-sm text-on-surface-variant">Profile not available</span>
+        </div>
+        <button disabled class="p-1 text-on-surface-variant rounded ft-off" title="Not available yet" type="button"><span class="material-symbols-outlined text-[18px]">more_vert</span></button>
+      </div>
+    </div>
+  </header>
+
+  <!-- mt-16 clears the 4rem header; py-space-md is the design's own gap (Stitch's pt-16 overrode it, so the first card touched the header). -->
+  <main class="relative mt-16 bg-background flex-1 w-full px-gutter py-space-md">
+    <div class="flex flex-col w-full">
+      <div id="banner" class="hidden mb-space-md p-3 rounded-lg bg-error-container text-on-error-container font-body-sm text-body-sm"></div>
+
+      <!-- Top metrics -->
+      <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 bg-surface-container-lowest rounded-xl shadow-sm mb-space-lg">
+        <div class="p-space-lg flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant font-semibold">Active Flights</span>
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-surface-container-high text-secondary font-data-mono text-[11px]"><span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>Active rows</span>
+          </div>
+          <div class="mt-space-sm flex items-baseline gap-space-xs"><span id="m-tracked" class="font-headline-lg text-headline-lg text-on-surface font-semibold tracking-tight">–</span><span class="font-headline-sm text-headline-sm text-on-surface-variant font-medium">Tracked</span></div>
+          <div class="mt-space-xs flex items-center justify-between font-body-sm text-body-sm gap-2">
+            <span id="m-split" class="text-on-surface-variant"></span>
+            <span id="m-onsched" class="font-label-sm text-label-sm text-on-tertiary-container font-semibold"></span>
+          </div>
+        </div>
+        <div class="p-space-lg flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant font-semibold">Arriving <span data-f="home">BLR</span></span>
+            <span id="m-terminals" class="font-data-mono text-data-mono text-on-surface-variant"></span>
+          </div>
+          <div class="mt-space-sm flex items-baseline gap-space-xs"><span id="m-inbound" class="font-headline-lg text-headline-lg text-on-surface font-semibold tracking-tight">–</span><span class="font-headline-sm text-headline-sm text-on-surface-variant font-medium">Inbound</span></div>
+          <div class="mt-space-xs flex items-center justify-between font-body-sm text-body-sm gap-2">
+            <span id="m-next" class="text-on-surface-variant truncate"></span>
+            <span id="m-next-term" class="hidden font-data-mono text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant font-medium"></span>
+          </div>
+        </div>
+        <div class="p-space-lg flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant font-semibold">Delay Monitoring</span>
+            <span id="m-impacted-chip" class="hidden inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-error-container text-on-error-container font-label-sm text-label-sm font-semibold"><span class="w-1.5 h-1.5 rounded-full bg-error"></span><span id="m-impacted-chip-n"></span> Impacted</span>
+          </div>
+          <div class="mt-space-sm flex items-baseline gap-space-xs"><span id="m-alerts" class="font-headline-lg text-headline-lg text-on-surface font-semibold tracking-tight">–</span><span class="font-headline-sm text-headline-sm text-on-surface-variant font-medium">Alerts</span></div>
+          <div class="mt-space-xs flex items-center justify-between font-body-sm text-body-sm gap-2">
+            <span id="m-delays" class="text-on-surface-variant font-data-mono text-[12px] truncate"></span>
+            <span class="font-label-sm text-label-sm text-secondary font-medium whitespace-nowrap">Cabs re-planned each tick</span>
+          </div>
+        </div>
+        <div class="p-space-lg flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant font-semibold">Airport Transit</span>
+            <span class="font-data-mono text-[11px] text-on-surface-variant">Cab grouping</span>
+          </div>
+          <div class="mt-space-sm flex items-baseline gap-space-xs"><span id="m-groups" class="font-headline-lg text-headline-lg text-on-surface font-semibold tracking-tight">–</span><span class="font-headline-sm text-headline-sm text-on-surface-variant font-medium">Cab Groups</span></div>
+          <div class="mt-space-xs flex items-center justify-between font-body-sm text-body-sm gap-2">
+            <span id="m-guests" class="text-on-surface-variant"></span>
+            <span class="font-label-sm text-label-sm font-medium text-on-surface ft-off" title="Wait times are not recorded yet">Avg wait —</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-gutter-desktop items-start">
+        <!-- Flight operations console -->
+        <div class="lg:col-span-8 flex flex-col gap-space-md min-w-0">
+          <div class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm flex flex-col gap-space-sm">
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-space-sm">
+              <div class="relative flex-1 sm:min-w-[240px]">
+                <span class="material-symbols-outlined absolute left-3 top-2.5 text-on-surface-variant text-[18px]">search</span>
+                <input id="search" class="w-full h-9 pl-9 pr-space-md bg-surface-container-low text-on-surface font-body-sm text-body-sm rounded-lg placeholder:text-on-surface-variant/60 focus:bg-surface-container-lowest focus:ring-1 focus:ring-secondary outline-none transition-all" placeholder="Search flight (e.g. EK568), guest, cab or driver..." type="text" aria-label="Search flights">
+              </div>
+              <div class="flex items-center gap-space-xs self-stretch sm:self-auto justify-end">
+                <button disabled title="Not available yet" class="ft-off h-9 px-3 rounded-lg bg-surface-container-low text-on-surface flex items-center gap-1.5 font-label-md text-label-md"><span class="material-symbols-outlined text-[16px] text-on-surface-variant">tune</span><span>Filter Status</span><span class="material-symbols-outlined text-[16px] text-on-surface-variant">expand_more</span></button>
+                <button data-refresh class="h-9 w-9 rounded-lg bg-surface-container-low text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors flex items-center justify-center" title="Refresh data"><span class="material-symbols-outlined text-[18px]">cached</span></button>
+                <a aria-disabled="true" tabindex="-1" title="Not available yet: use the Flights sheet" class="ft-off h-9 px-3.5 rounded-lg bg-primary text-on-primary font-label-md text-label-md flex items-center gap-1.5 whitespace-nowrap"><span>All <span id="all-count">0</span> Flights</span><span class="material-symbols-outlined text-[14px]">arrow_forward</span></a>
+              </div>
+            </div>
+            <div class="flex items-center justify-between pt-space-xs gap-2">
+              <div class="flex items-center gap-1 bg-surface-container-low p-1 rounded-lg overflow-x-auto" role="tablist">
+                <button data-dir="ALL" role="tab" class="px-3 py-1 rounded font-label-sm text-label-sm transition-all whitespace-nowrap">All Inbound / Outbound (<span data-count="ALL">0</span>)</button>
+                <button data-dir="ARR" role="tab" class="px-3 py-1 rounded font-label-sm text-label-sm transition-colors whitespace-nowrap">Arrivals <span data-f="home">BLR</span> (<span data-count="ARR">0</span>)</button>
+                <button data-dir="DEP" role="tab" class="px-3 py-1 rounded font-label-sm text-label-sm transition-colors whitespace-nowrap">Departures <span data-f="home">BLR</span> (<span data-count="DEP">0</span>)</button>
+              </div>
+              <div class="hidden md:flex items-center gap-space-sm font-data-mono text-[11px] text-on-surface-variant">
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-on-tertiary-container"></span>Live Tracking (ADS-B)</span>
+                <span>•</span><span>Tick every 5 min</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="bg-surface-container-low/60 font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">
+                    <th class="py-3 px-4 font-semibold">Flight / Carrier</th>
+                    <th class="py-3 px-3 font-semibold">Faculty Guest</th>
+                    <th class="py-3 px-3 font-semibold">Route (<span data-f="home">BLR</span>)</th>
+                    <th class="py-3 px-3 font-semibold">Sched</th>
+                    <th class="py-3 px-3 font-semibold">Estimated / Act</th>
+                    <th class="py-3 px-3 font-semibold">Transit Status</th>
+                    <th class="py-3 px-3 font-semibold">Cab Grouping</th>
+                    <th class="py-3 pr-4 pl-2 text-right font-semibold">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="rows" class="text-on-surface font-body-sm text-body-sm">
+                  <tr><td colspan="8" class="py-6 px-4 text-center text-on-surface-variant">Loading flights…</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="px-space-md py-3 bg-surface-container-low/40 flex flex-col sm:flex-row items-center justify-between gap-2 font-body-sm text-body-sm text-on-surface-variant">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-[16px] text-secondary">verified_user</span>
+                <span>Data: <strong>OpenSky ADS-B</strong> (live positions) &amp; <strong>AeroDataBox</strong> (flight status API).</span>
+              </div>
+              <div id="attribution" class="font-data-mono text-[11px] text-on-surface-variant/80">Flight status data: AeroDataBox (https://aerodatabox.com)</div>
+            </div>
+          </div>
+
+          <!-- Curbside map: kept from the design, no data source yet -->
+          <div class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm flex flex-col gap-space-sm">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2"><span class="material-symbols-outlined text-[18px] text-primary">pin_drop</span><span class="font-label-md text-label-md font-semibold text-on-surface"><span data-f="home">BLR</span> Active Curbside Zone</span></div>
+              <span class="font-data-mono text-[11px] text-on-surface-variant ft-off">Congestion data not available</span>
+            </div>
+            <div class="w-full h-44 rounded-lg bg-surface-container-low border border-dashed border-outline-variant/60 flex flex-col items-center justify-center gap-1 text-on-surface-variant ft-off" title="Not available yet">
+              <span class="material-symbols-outlined text-[28px]">map</span>
+              <span class="font-label-md text-label-md">Curbside map not available yet</span>
+              <span class="font-body-sm text-[12px]">Pickup times are on the Groups sheet</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Operational sidebar -->
+        <div class="lg:col-span-4 flex flex-col gap-space-md min-w-0">
+          <div class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md flex flex-col gap-space-sm">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[18px] text-error">notification_important</span><span class="font-label-md text-label-md font-semibold text-on-surface">Operations Attention</span></div>
+              <span id="attn-count" class="font-data-mono text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant font-semibold">0 Triggers</span>
+            </div>
+            <div id="attention" class="flex flex-col gap-space-xs mt-1"></div>
+          </div>
+
+          <div class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md flex flex-col gap-space-sm">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[18px] text-primary">schedule</span><span class="font-label-md text-label-md font-semibold text-on-surface">Tick Engine Activity</span></div>
+              <span class="font-data-mono text-[11px] text-on-surface-variant">Log sheet</span>
+            </div>
+            <div id="activity" class="relative pl-4 space-y-3.5 before:content-[''] before:absolute before:left-1 before:top-2 before:bottom-2 before:w-0.5 before:bg-surface-container"></div>
+          </div>
+
+          <div class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md flex flex-col gap-space-sm">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[18px] text-primary">data_thresholding</span><span class="font-label-md text-label-md font-semibold text-on-surface">Telemetry &amp; API Budget</span></div>
+              <span id="budget-health" class="font-data-mono text-[11px] text-on-surface-variant font-semibold">–</span>
+            </div>
+            <div class="flex flex-col gap-space-xs font-body-sm text-body-sm">
+              <div class="flex flex-col gap-1 p-2.5 rounded-lg bg-surface-container-low">
+                <div class="flex justify-between items-baseline font-label-sm text-label-sm gap-2">
+                  <span class="text-on-surface font-semibold">AeroDataBox API Quota</span>
+                  <span id="budget-units" class="font-data-mono text-on-surface font-semibold text-right">–</span>
+                </div>
+                <div class="w-full h-1.5 bg-surface-container rounded-full overflow-hidden"><div id="budget-bar" class="h-full bg-secondary rounded-full" style="width:0%"></div></div>
+                <span id="budget-note" class="text-[10px] text-on-surface-variant"></span>
+              </div>
+              <div class="flex items-center justify-between p-2.5 rounded-lg bg-surface-container-low ft-off" title="Not monitored yet">
+                <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-outline"></span>
+                  <div class="flex flex-col"><span class="font-label-sm text-label-sm font-semibold text-on-surface">OpenSky Network</span><span class="text-[10px] text-on-surface-variant">Availability not monitored</span></div></div>
+                <span class="font-data-mono text-[11px] text-on-surface-variant">—</span>
+              </div>
+              <div class="flex items-center justify-between p-2.5 rounded-lg bg-surface-container-low ft-off" title="Not monitored yet">
+                <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-outline"></span>
+                  <div class="flex flex-col"><span class="font-label-sm text-label-sm font-semibold text-on-surface">Telegram Dispatch</span><span class="text-[10px] text-on-surface-variant">Delivery errors appear on the Log sheet</span></div></div>
+                <span class="font-data-mono text-[11px] text-on-surface-variant">—</span>
+              </div>
+            </div>
+            <div class="pt-space-xs border-t border-outline-variant/10 flex items-center justify-between font-data-mono text-[11px] text-on-surface-variant">
+              <span>Engine interval: 5m 00s</span>
+              <span id="trigger-note" class="text-secondary font-medium"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Assistant: interface only. Nothing is sent anywhere unless the server reports an assistant backend (task T6). -->
+    <div class="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
+      <div id="flight-assistant-card" class="hidden w-[360px] max-w-[calc(100vw-2rem)] bg-surface-container-lowest border border-outline-variant/30 rounded-xl shadow-xl overflow-hidden flex-col">
+        <div class="bg-surface-container-low/70 px-4 py-3 border-b border-outline-variant/20 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="w-6 h-6 rounded bg-primary text-on-primary flex items-center justify-center"><span class="material-symbols-outlined text-[14px]">auto_awesome</span></div>
+            <div class="flex flex-col">
+              <span class="font-label-md text-label-md font-semibold text-on-surface leading-none">Operations Assistant</span>
+              <div class="flex items-center gap-1.5 mt-0.5"><span id="assistant-dot" class="w-1.5 h-1.5 rounded-full bg-outline"></span><span id="assistant-state" class="font-label-sm text-[10px] text-on-surface-variant">Not connected</span></div>
+            </div>
+          </div>
+          <button id="assistant-close" class="p-1 text-on-surface-variant hover:text-on-surface rounded hover:bg-surface-container transition-colors" title="Minimize assistant" type="button"><span class="material-symbols-outlined text-[16px]">close</span></button>
+        </div>
+        <div id="assistant-thread" class="p-4 flex flex-col gap-3 max-h-[380px] overflow-y-auto">
+          <div class="p-3 rounded-lg bg-surface-container-low/60 border border-outline-variant/10 text-on-surface font-body-sm text-body-sm leading-relaxed">Hello. How can I assist with today's arrivals or cab schedules?</div>
+          <div class="flex flex-col gap-1.5">
+            <span class="font-label-sm text-[10px] uppercase tracking-wider text-on-surface-variant font-semibold px-0.5">Suggested inquiries</span>
+            <div class="flex flex-col gap-1.5">
+              <button data-suggest class="text-left px-2.5 py-1.5 rounded-lg bg-surface-container-low text-on-surface text-[12px] font-label-md hover:bg-surface-container hover:text-secondary transition-colors flex items-center justify-between group"><span>Which flights are delayed today?</span><span class="material-symbols-outlined text-[13px] text-on-surface-variant group-hover:text-secondary">arrow_forward</span></button>
+              <button data-suggest class="text-left px-2.5 py-1.5 rounded-lg bg-surface-container-low text-on-surface text-[12px] font-label-md hover:bg-surface-container hover:text-secondary transition-colors flex items-center justify-between group"><span>Summarize today's arrivals.</span><span class="material-symbols-outlined text-[13px] text-on-surface-variant group-hover:text-secondary">arrow_forward</span></button>
+              <button data-suggest class="text-left px-2.5 py-1.5 rounded-lg bg-surface-container-low text-on-surface text-[12px] font-label-md hover:bg-surface-container hover:text-secondary transition-colors flex items-center justify-between group"><span>Which cab groups need adjustment?</span><span class="material-symbols-outlined text-[13px] text-on-surface-variant group-hover:text-secondary">arrow_forward</span></button>
+              <button data-suggest class="text-left px-2.5 py-1.5 rounded-lg bg-surface-container-low text-on-surface text-[12px] font-label-md hover:bg-surface-container hover:text-secondary transition-colors flex items-center justify-between group"><span>Show flights with unknown status.</span><span class="material-symbols-outlined text-[13px] text-on-surface-variant group-hover:text-secondary">arrow_forward</span></button>
+            </div>
+          </div>
+        </div>
+        <form id="assistant-form" class="p-3 border-t border-outline-variant/20 bg-surface-container-lowest">
+          <div class="relative flex items-center">
+            <input id="assistant-input" class="w-full h-9 pl-3 pr-8 bg-surface-container-low text-on-surface font-body-sm text-[12px] rounded-lg placeholder:text-on-surface-variant/60 focus:bg-surface-container-lowest focus:ring-1 focus:ring-secondary outline-none transition-all" placeholder="Ask about flights, delays, or cab assignments..." type="text" aria-label="Message the assistant" maxlength="500">
+            <button class="absolute right-2 p-1 text-on-surface-variant hover:text-secondary transition-colors flex items-center justify-center" title="Send message" type="submit"><span class="material-symbols-outlined text-[16px]">send</span></button>
+          </div>
+        </form>
+      </div>
+      <button id="flight-assistant-trigger" class="h-10 px-3.5 rounded-full bg-primary text-on-primary hover:bg-inverse-surface shadow-md flex items-center gap-2 font-label-md text-label-md transition-all" title="Open Operations Assistant" type="button" aria-expanded="false" aria-controls="flight-assistant-card">
+        <span class="material-symbols-outlined text-[18px] text-tertiary-fixed">auto_awesome</span><span class="tracking-tight font-medium">Flight Assistant</span>
+      </button>
+    </div>
+  </main>
+</div>
+
+<script>
+(function () {
+  var TZ = 'Asia/Kolkata', REFRESH_MS = 5 * 60 * 1000;
+  var CLOCK = /^.*?(\d{1,2}:\d{2})\s*$/; // 'Tue 20 Oct 14:35' (fmtIST on the sheet) -> '14:35'
+  var IMPACT = { DELAYED: 1, CANCELLED: 1, DIVERTED: 1, UNKNOWN: 1 };
+  var state = { data: null, dir: 'ALL', query: '', loadedAt: 0 };
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; });
+  };
+  var timeFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+  var dateFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, day: 'numeric', month: 'short', year: 'numeric' });
+  var hm = function (ms) { return typeof ms === 'number' && isFinite(ms) ? timeFmt.format(ms) : '--:--'; };
+  var mins = function (a, b) { return Math.round((a - b) / 60000); };
+  var dur = function (m) { return m >= 60 ? Math.floor(m / 60) + 'h ' + (m % 60) + 'm' : m + 'm'; };
+  var signed = function (m) { return (m > 0 ? '+' : '') + m + 'm'; };
+  var term = function (t) { return t ? (/^t/i.test(t) ? t.toUpperCase() : 'T' + t) : ''; };
+  var carrier = function (f) { var m = /^([A-Z0-9]{2})/.exec(f.flight || ''); return m ? m[1] : '—'; };
+  var delayOf = function (f) { return f.etaAt && f.schedAt ? mins(f.etaAt, f.schedAt) : null; };
+
+  // ---- theme (light default; choice remembered per browser when storage is available)
+  function applyTheme(dark) {
+    if (dark) document.documentElement.setAttribute('data-theme', 'dark'); else document.documentElement.removeAttribute('data-theme');
+    $('theme-icon').textContent = dark ? 'light_mode' : 'dark_mode';
+  }
+  applyTheme(document.documentElement.getAttribute('data-theme') === 'dark');
+  $('theme-toggle-btn').addEventListener('click', function () {
+    var dark = document.documentElement.getAttribute('data-theme') !== 'dark';
+    applyTheme(dark);
+    try { localStorage.setItem('ft-theme', dark ? 'dark' : 'light'); } catch (e) {}
+  });
+
+  // ---- data
+  function load() {
+    if (!(window.google && google.script && google.script.run)) {
+      return showBanner('This page needs the deployed web app (Apps Script → Deploy → Web app) to read flight data.');
+    }
+    $('synced-ago').textContent = 'Syncing…';
+    google.script.run.withSuccessHandler(function (d) {
+      state.data = d; state.loadedAt = Date.now(); render();
+    }).withFailureHandler(function (e) {
+      showBanner('Could not load dashboard data: ' + (e && e.message || e));
+      $('synced-ago').textContent = 'Sync failed';
+    }).getDashboardData();
+  }
+  function showBanner(text) { var b = $('banner'); b.textContent = text; b.classList.toggle('hidden', !text); }
+
+  function render() {
+    var d = state.data, now = d.generatedAt;
+    showBanner(d.errors && d.errors.length ? 'Some data could not be read. ' + d.errors.join(' · ') : '');
+    Array.prototype.forEach.call(document.querySelectorAll('[data-f="home"]'), function (el) { el.textContent = d.homeAirport || 'BLR'; });
+    $('today').textContent = 'Today, ' + dateFmt.format(now);
+    $('attribution').textContent = d.attribution;
+    renderEngine(d);
+    renderMetrics(d, now);
+    renderTable();
+    renderAttention(d);
+    renderActivity(d);
+    renderBudget(d);
+    renderAssistantState(d);
+    tickAgo();
+  }
+
+  function renderEngine(d) {
+    var n = d.tickTriggers, on = n >= 1;
+    $('engine-dot').className = 'w-2 h-2 rounded-full ' + (n === 1 ? 'bg-on-tertiary-container animate-pulse' : n > 1 ? 'bg-error' : 'bg-outline');
+    $('engine-label').textContent = n == null ? 'Engine status unknown' : n === 1 ? 'Engine Active' : n > 1 ? n + ' triggers (duplicate)' : 'Engine stopped';
+    $('sync-label').textContent = on ? 'Live Syncing (OpenSky / ADB)' : 'Tracking stopped';
+    $('sync-dot').className = 'w-1.5 h-1.5 rounded-full ' + (on ? 'bg-on-tertiary-container' : 'bg-outline');
+    $('trigger-note').textContent = n == null ? '' : on ? 'Trigger installed' : 'Start tracking from the sheet menu';
+  }
+
+  function renderMetrics(d, now) {
+    var act = d.flights.filter(function (f) { return f.active; });
+    var arr = act.filter(function (f) { return f.dir === 'ARR'; }), dep = act.filter(function (f) { return f.dir === 'DEP'; });
+    var impacted = act.filter(function (f) { return IMPACT[f.status]; });
+    $('m-tracked').textContent = act.length;
+    $('m-split').textContent = arr.length + ' Arrivals • ' + dep.length + ' Departures';
+    $('m-onsched').textContent = (act.length - impacted.length) + ' on-schedule';
+
+    var inbound = arr.filter(function (f) { return !f.final; });
+    $('m-inbound').textContent = inbound.length;
+    var terms = {};
+    inbound.forEach(function (f) { if (f.terminal) terms[term(f.terminal)] = 1; });
+    $('m-terminals').textContent = Object.keys(terms).sort().join(' & ') || 'Inbound';
+    var next = inbound.map(function (f) { return { f: f, t: f.etaAt || f.schedAt }; })
+      .filter(function (x) { return x.t && x.t >= now; }).sort(function (a, b) { return a.t - b.t; })[0];
+    $('m-next').innerHTML = next ? 'Next: <strong class="text-on-surface font-semibold">' + esc(next.f.flight) + '</strong> in ' + dur(mins(next.t, now)) : 'No upcoming arrivals';
+    $('m-next-term').classList.toggle('hidden', !(next && next.f.terminal));
+    if (next && next.f.terminal) $('m-next-term').textContent = term(next.f.terminal);
+
+    $('m-alerts').textContent = impacted.length;
+    $('m-alerts').className = 'font-headline-lg text-headline-lg font-semibold tracking-tight ' + (impacted.length ? 'text-error' : 'text-on-surface');
+    $('m-impacted-chip').classList.toggle('hidden', !impacted.length);
+    $('m-impacted-chip-n').textContent = impacted.length;
+    $('m-delays').textContent = impacted.slice(0, 3).map(function (f) {
+      var dl = delayOf(f);
+      return (f.status === 'DELAYED' && dl ? signed(dl) : f.status.toLowerCase()) + ' ' + f.flight;
+    }).join(' • ') || 'No delays';
+
+    var guests = d.groups.reduce(function (s, g) { return s + g.count; }, 0);
+    $('m-groups').textContent = d.groups.length;
+    $('m-guests').textContent = guests + ' Guests • ' + d.groups.filter(function (g) { return g.driver; }).length + ' with driver';
+  }
+
+  function statusPill(f) {
+    var s = f.status || 'SCHEDULED';
+    var cls = s === 'DELAYED' || s === 'CANCELLED' || s === 'DIVERTED' ? ['bg-error-container text-on-error-container', 'bg-error' + (s === 'DELAYED' ? ' animate-pulse' : '')]
+      : s === 'DEPARTED' ? ['bg-secondary-fixed text-on-secondary-fixed-variant', 'bg-secondary']
+      : s === 'LANDED' ? ['bg-tertiary-fixed text-on-tertiary-fixed-variant', 'bg-on-tertiary-container']
+      : ['bg-surface-container text-on-surface-variant', ''];
+    var sub = s === 'UNKNOWN' ? (f.lastError || 'Lookup not performed') : f.etaSource;
+    return '<div class="inline-flex flex-col"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded ' + cls[0] + ' font-label-sm text-label-sm font-semibold">' +
+      (cls[1] ? '<span class="w-1.5 h-1.5 rounded-full ' + cls[1] + '"></span>' : '') + esc(s) + '</span>' +
+      (sub ? '<span class="text-[10px] font-data-mono text-on-surface-variant mt-0.5 max-w-[180px] truncate" title="' + esc(sub) + '">' + esc(sub) + '</span>' : '') + '</div>';
+  }
+
+  function estimateCell(f) {
+    if (!f.etaAt) return '<span class="text-on-surface-variant">--:--</span>';
+    var dl = delayOf(f);
+    if (f.final && f.status === 'LANDED') return '<span class="text-on-surface">' + hm(f.etaAt) + '</span> <span class="text-[10px] text-on-tertiary-container font-semibold">(Landed)</span>';
+    if (dl != null && dl >= 5) return '<span class="text-error font-semibold">' + hm(f.etaAt) + '</span><span class="text-[10px] text-error font-medium ml-0.5">(' + signed(dl) + ')</span>';
+    if (dl != null && dl <= -5) return '<span class="text-on-tertiary-container font-medium">' + hm(f.etaAt) + ' <span class="text-[10px] font-semibold">(' + dl + 'm early)</span></span>';
+    return '<span class="text-on-surface">' + hm(f.etaAt) + '</span> <span class="text-[10px] text-on-tertiary-container font-semibold ml-0.5">(On Time)</span>';
+  }
+
+  function cabCell(f, groups, maxSeats) {
+    if (!f.groupId) {
+      if (!f.active || f.final) return '<span class="text-[11px] font-medium text-on-surface-variant">—</span>';
+      return '<div class="flex items-center gap-1 text-error text-[11px] font-medium"><span class="material-symbols-outlined text-[14px]">warning</span><span>Unassigned transit</span></div>';
+    }
+    var g = groups[f.groupId] || {};
+    var sub = [f.pickupDisp ? 'Pickup ' + f.pickupDisp.replace(CLOCK, '$1') : '', g.driver ? 'Driver ' + g.driver : ''].filter(Boolean).join(' • ');
+    return '<div class="flex flex-col"><div class="flex items-center gap-1 text-[11px] font-medium text-on-surface"><span class="material-symbols-outlined text-[14px] text-secondary">local_taxi</span><span>Cab ' +
+      esc(f.groupId) + (g.count ? ' (' + g.count + (maxSeats ? '/' + maxSeats : '') + ' shared)' : '') + '</span></div>' +
+      (sub ? '<span class="text-[10px] text-on-surface-variant font-data-mono">' + esc(sub) + '</span>' : '') + '</div>';
+  }
+
+  function routeCell(f, home) {
+    var other = '<span class="font-semibold text-on-surface-variant/60" title="Origin/destination airport is not stored yet">—</span>';
+    var here = '<span class="font-semibold text-on-surface">' + esc(f.airport || home) + '</span>';
+    var arrow = '<span class="material-symbols-outlined text-[13px] text-on-surface-variant">arrow_forward</span>';
+    return '<div class="flex items-center gap-1 font-data-mono text-[12px]">' + (f.dir === 'ARR' ? other + arrow + here : here + arrow + other) +
+      (f.terminal ? '<span class="ml-1 text-[10px] px-1.5 rounded bg-surface-container text-on-surface-variant font-semibold">' + esc(term(f.terminal)) + '</span>' : '') + '</div>';
+  }
+
+  function visibleFlights() {
+    var q = state.query.toLowerCase(), groups = groupIndex();
+    return state.data.flights.filter(function (f) {
+      if (state.dir !== 'ALL' && f.dir !== state.dir) return false;
+      if (!q) return true;
+      var g = groups[f.groupId] || {};
+      return [f.flight, f.name, f.groupId, g.driver, f.status].join(' ').toLowerCase().indexOf(q) >= 0;
+    }).sort(function (a, b) {
+      return (a.active === b.active ? 0 : a.active ? -1 : 1) || (a.final === b.final ? 0 : a.final ? 1 : -1) ||
+        ((a.etaAt || a.schedAt || Infinity) - (b.etaAt || b.schedAt || Infinity));
+    });
+  }
+  function groupIndex() { var m = {}; state.data.groups.forEach(function (g) { m[g.id] = g; }); return m; }
+
+  function renderTable() {
+    var d = state.data, groups = groupIndex(), list = visibleFlights();
+    var counts = { ALL: d.flights.length, ARR: 0, DEP: 0 };
+    d.flights.forEach(function (f) { counts[f.dir]++; });
+    Object.keys(counts).forEach(function (k) { document.querySelector('[data-count="' + k + '"]').textContent = counts[k]; });
+    $('all-count').textContent = d.flights.length;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-dir]'), function (b) {
+      var on = b.getAttribute('data-dir') === state.dir;
+      b.setAttribute('aria-selected', on);
+      b.className = 'px-3 py-1 rounded font-label-sm text-label-sm whitespace-nowrap transition-all ' +
+        (on ? 'bg-surface-container-lowest text-on-surface shadow-sm font-semibold' : 'text-on-surface-variant hover:text-on-surface');
+    });
+    if (!list.length) {
+      $('rows').innerHTML = '<tr><td colspan="8" class="py-6 px-4 text-center text-on-surface-variant">' +
+        (d.flights.length ? 'No flights match this view.' : 'No flights yet. Add rows on the Flights sheet or use the Import menu.') + '</td></tr>';
+      return;
+    }
+    $('rows').innerHTML = list.map(function (f, i) {
+      var dim = !f.active || (f.final && f.status !== 'LANDED') ? ' opacity-75' : '';
+      return '<tr class="hover:bg-surface-container-low/40 transition-colors group ' + (i % 2 ? 'bg-surface-container-low/20' : 'bg-surface-container-lowest') + '">' +
+        '<td class="py-3.5 px-4 whitespace-nowrap' + dim + '"><div class="flex items-center gap-2.5"><div class="w-7 h-7 rounded bg-surface-container-high flex items-center justify-center text-primary font-data-mono text-[11px] font-bold">' + esc(carrier(f)) + '</div>' +
+          '<div class="flex flex-col"><span class="font-data-mono text-[13px] font-bold ' + (f.invalid ? 'text-error' : 'text-on-surface group-hover:text-secondary') + ' transition-colors">' + esc(f.flight) + '</span>' +
+          '<span class="text-[10px] text-on-surface-variant/60 font-mono" title="Aircraft type is not stored yet">' + (f.dir === 'ARR' ? 'Arrival' : 'Departure') + '</span></div></div></td>' +
+        '<td class="py-3.5 px-3 min-w-[160px]' + dim + '"><div class="flex flex-col"><span class="font-medium text-on-surface font-label-md text-label-md">' + esc(f.name || f.id) + '</span>' +
+          '<span class="text-[11px] text-on-surface-variant/60 truncate" title="Institute is not stored yet">—</span></div></td>' +
+        '<td class="py-3.5 px-3 whitespace-nowrap' + dim + '">' + routeCell(f, d.homeAirport) + '</td>' +
+        '<td class="py-3.5 px-3 whitespace-nowrap font-data-mono text-[12px] text-on-surface-variant' + dim + '">' + hm(f.schedAt) + '</td>' +
+        '<td class="py-3.5 px-3 whitespace-nowrap font-data-mono text-[12px]' + dim + '">' + estimateCell(f) + '</td>' +
+        '<td class="py-3.5 px-3 whitespace-nowrap' + dim + '">' + statusPill(f) + '</td>' +
+        '<td class="py-3.5 px-3 whitespace-nowrap' + dim + '">' + cabCell(f, groups, d.maxSeats) + '</td>' +
+        '<td class="py-3.5 pr-4 pl-2 text-right whitespace-nowrap">' + (!f.active
+          ? '<span class="font-data-mono text-[11px] text-on-surface-variant">Inactive</span>'
+          : '<button disabled class="p-1 rounded text-on-surface-variant ft-off" title="Row actions are not available yet" type="button"><span class="material-symbols-outlined text-[18px]">more_vert</span></button>') + '</td></tr>';
+    }).join('');
+  }
+
+  function renderAttention(d) {
+    var items = d.flights.filter(function (f) { return f.active && (IMPACT[f.status] || (f.lastError && !f.final)); });
+    $('attn-count').textContent = items.length + (items.length === 1 ? ' Trigger' : ' Triggers');
+    $('attn-count').className = 'font-data-mono text-[11px] px-1.5 py-0.5 rounded font-semibold ' + (items.length ? 'bg-error-container text-on-error-container' : 'bg-surface-container text-on-surface-variant');
+    if (!items.length) { $('attention').innerHTML = '<p class="font-body-sm text-body-sm text-on-surface-variant px-1">Nothing needs attention.</p>'; return; }
+    $('attention').innerHTML = items.slice(0, 6).map(function (f) {
+      var dl = delayOf(f), s = f.status;
+      var title = f.flight + ' ' + (s === 'DELAYED' && dl ? 'Delayed (' + signed(dl) + ')' : IMPACT[s] ? 'Status ' + s : 'Needs a check');
+      var text = s === 'DELAYED'
+        ? (f.dir === 'ARR' ? 'New ETA ' : 'New departure ') + hm(f.etaAt) + ' IST.' + (f.groupId ? ' Cab ' + f.groupId + (f.pickupDisp ? ' pickup ' + f.pickupDisp.replace(CLOCK, '$1') + ' IST.' : '.') : '')
+        : (f.lastError || 'Status ' + s + '. See the Log sheet.');
+      var action = s === 'UNKNOWN' ? 'Force Check API' : f.groupId ? 'Review Cab ' + f.groupId : 'Review';
+      return '<div class="p-3 rounded-lg bg-surface-container-low/70 flex flex-col gap-1.5">' +
+        '<div class="flex items-center justify-between gap-2"><span class="font-label-sm text-label-sm font-semibold text-on-surface flex items-center gap-1"><span class="w-2 h-2 rounded-full ' + (s === 'UNKNOWN' || !IMPACT[s] ? 'bg-outline' : 'bg-error') + '"></span>' + esc(title) + '</span>' +
+        '<span class="font-data-mono text-[11px] text-on-surface-variant whitespace-nowrap">' + esc(f.lastCheckDisp.replace(CLOCK, '$1')) + '</span></div>' +
+        '<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">' + esc(f.name ? f.name + ': ' : '') + esc(text) + '</p>' +
+        '<div class="flex items-center justify-end gap-2 pt-1"><button disabled title="Not available yet" class="ft-off px-2.5 py-1 rounded bg-surface-container-lowest text-on-surface font-label-sm text-label-sm font-semibold">' + esc(action) + '</button></div></div>';
+    }).join('');
+  }
+
+  function renderActivity(d) {
+    if (!d.log.length) { $('activity').innerHTML = '<p class="font-body-sm text-[12px] text-on-surface-variant">No log entries yet.</p>'; return; }
+    $('activity').innerHTML = d.log.slice().reverse().map(function (e) {
+      var dot = /err/i.test(e.level) ? 'bg-error' : /warn/i.test(e.level) ? 'bg-secondary' : 'bg-on-tertiary-container';
+      return '<div class="relative"><span class="absolute -left-[17px] top-1.5 w-2 h-2 rounded-full ' + dot + ' ring-2 ring-surface-container-lowest"></span>' +
+        '<div class="flex items-baseline justify-between gap-2"><span class="font-data-mono text-[11px] font-semibold text-on-surface">' + (e.at ? hm(e.at) + ' IST' : '') + '</span>' +
+        '<span class="text-[10px] text-on-surface-variant font-mono">' + esc([e.level, e.flight].filter(Boolean).join(' · ')) + '</span></div>' +
+        '<p class="font-body-sm text-[12px] text-on-surface-variant mt-0.5 leading-snug line-clamp-2" title="' + esc(e.message) + '">' + esc(e.message) + '</p></div>';
+    }).join('');
+  }
+
+  function renderBudget(d) {
+    var u = d.usage;
+    if (!u) {
+      $('budget-health').textContent = 'Unavailable'; $('budget-health').className = 'font-data-mono text-[11px] text-error font-semibold';
+      $('budget-units').textContent = '—'; $('budget-bar').style.width = '0%';
+      $('budget-note').textContent = d.usageError || 'Usage could not be read.';
+      return;
+    }
+    var pct = u.unitLimit ? Math.min(100, (u.units / u.unitLimit) * 100) : 0;
+    var health = u.suspended ? 'Suspended' : pct >= 85 ? 'Watch' : 'Healthy';
+    $('budget-health').textContent = health;
+    $('budget-health').className = 'font-data-mono text-[11px] font-semibold ' + (health === 'Healthy' ? 'text-on-tertiary-container' : 'text-error');
+    $('budget-units').textContent = u.units + ' / ' + u.unitLimit + ' units (' + pct.toFixed(1) + '%)';
+    $('budget-bar').style.width = pct + '%';
+    $('budget-bar').className = 'h-full rounded-full ' + (health === 'Healthy' ? 'bg-secondary' : 'bg-error');
+    $('budget-note').textContent = u.suspended ? 'Lookups suspended: ' + u.suspended
+      : u.window + ' • ' + u.requests + ' / ' + u.requestLimit + ' requests • ' + Math.max(0, u.unitLimit - u.units) + ' units left';
+  }
+
+  // ---- assistant (interface only)
+  var card = $('flight-assistant-card'), trigger = $('flight-assistant-trigger'), input = $('assistant-input');
+  function setAssistantOpen(open) {
+    card.classList.toggle('hidden', !open); card.classList.toggle('flex', open);
+    trigger.setAttribute('aria-expanded', open);
+    if (open) input.focus();
+  }
+  trigger.addEventListener('click', function () { setAssistantOpen(card.classList.contains('hidden')); });
+  $('assistant-close').addEventListener('click', function () { setAssistantOpen(false); });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-suggest]'), function (b) {
+    b.addEventListener('click', function () { input.value = b.querySelector('span').textContent.trim(); input.focus(); }); // not the icon's ligature text
+  });
+  function bubble(text, mine) {
+    var el = document.createElement('div');
+    el.className = mine ? 'self-end max-w-[85%] px-3 py-2 rounded-lg bg-primary text-on-primary font-body-sm text-[12px]'
+      : 'p-3 rounded-lg bg-surface-container-low/60 border border-outline-variant/10 text-on-surface font-body-sm text-body-sm leading-relaxed';
+    el.textContent = text;
+    $('assistant-thread').appendChild(el);
+    $('assistant-thread').scrollTop = $('assistant-thread').scrollHeight;
+  }
+  function renderAssistantState(d) {
+    var on = !!(d && d.assistant && d.assistant.enabled);
+    $('assistant-state').textContent = on ? 'Online • Ground Ops Agent' : 'Not connected';
+    $('assistant-dot').className = 'w-1.5 h-1.5 rounded-full ' + (on ? 'bg-on-tertiary-container' : 'bg-outline');
+  }
+  $('assistant-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var q = input.value.trim();
+    if (!q) return;
+    bubble(q, true); input.value = '';
+    var on = state.data && state.data.assistant && state.data.assistant.enabled;
+    if (!on || !(window.google && google.script)) {
+      bubble('The assistant is not connected yet, so nothing was sent. Use the table and panels on this page for now.', false);
+      return;
+    }
+    google.script.run.withSuccessHandler(function (r) { bubble(r && r.text ? r.text : 'No answer.', false); })
+      .withFailureHandler(function (e) { bubble('The assistant failed: ' + (e && e.message || e), false); }).askAssistant(q);
+  });
+
+  // ---- controls
+  $('search').addEventListener('input', function (e) { state.query = e.target.value.trim(); if (state.data) renderTable(); });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-dir]'), function (b) {
+    b.addEventListener('click', function () { state.dir = b.getAttribute('data-dir'); if (state.data) renderTable(); });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-refresh]'), function (b) { b.addEventListener('click', load); });
+  function tickAgo() {
+    if (!state.loadedAt) return;
+    var m = mins(Date.now(), state.loadedAt);
+    $('synced-ago').textContent = m < 1 ? 'Synced just now' : 'Synced ' + dur(m) + ' ago';
+  }
+  setInterval(tickAgo, 30000);
+  setInterval(function () { if (!document.hidden) load(); }, REFRESH_MS);
+  load();
+})();
+</script>
+</body>
+</html>

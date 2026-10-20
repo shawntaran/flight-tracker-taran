@@ -1,0 +1,1997 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flight Tracker — Local Preview</title>
+<!-- Exact design system from DashboardPage.html: fonts, colour tokens, Tailwind config -->
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+<style>
+  :root {
+    --background: 250 248 255; --surface-container-lowest: 255 255 255; --surface-container-low: 242 243 255;
+    --surface-container: 234 237 255; --surface-container-high: 226 231 255;
+    --on-surface: 19 27 46; --on-surface-variant: 69 71 76;
+    --primary: 9 20 38; --on-primary: 255 255 255; --inverse-surface: 40 48 68;
+    --primary-fixed: 216 227 251; --on-primary-fixed: 17 28 45;
+    --secondary: 0 81 213; --on-secondary: 255 255 255;
+    --secondary-fixed: 219 225 255; --secondary-fixed-dim: 180 197 255;
+    --on-secondary-fixed: 0 23 75; --on-secondary-fixed-variant: 0 62 168;
+    --tertiary-fixed: 151 245 204; --tertiary-fixed-dim: 123 216 177;
+    --on-tertiary-fixed-variant: 0 81 58; --on-tertiary-container: 65 160 124;
+    --error: 186 26 26; --error-container: 255 218 214; --on-error-container: 147 0 10;
+    --outline: 117 119 125; --outline-variant: 197 198 205;
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --background: 13 17 27; --surface-container-lowest: 20 25 38; --surface-container-low: 27 33 49;
+    --surface-container: 33 40 58; --surface-container-high: 41 49 70;
+    --on-surface: 226 230 243; --on-surface-variant: 168 174 190;
+    --primary: 216 227 251; --on-primary: 13 22 40; --inverse-surface: 188 199 222;
+    --primary-fixed: 36 48 74; --on-primary-fixed: 216 227 251;
+    --secondary: 157 182 255; --on-secondary: 0 33 94;
+    --secondary-fixed: 30 47 96; --secondary-fixed-dim: 44 66 128;
+    --on-secondary-fixed: 219 225 255; --on-secondary-fixed-variant: 180 197 255;
+    --tertiary-fixed: 16 61 45; --tertiary-fixed-dim: 30 90 68;
+    --on-tertiary-fixed-variant: 151 245 204; --on-tertiary-container: 92 196 155;
+    --error: 255 180 171; --error-container: 92 21 18; --on-error-container: 255 218 214;
+    --outline: 142 147 160; --outline-variant: 58 65 82;
+    color-scheme: dark;
+  }
+  html, body { margin: 0; padding: 0; }
+  body { overscroll-behavior: none; background: rgb(var(--background)); }
+  main > :first-child { margin-top: 0 !important; }
+  main > :last-child { margin-bottom: 0 !important; }
+  ::-webkit-scrollbar { display: none; }
+  .ft-off { opacity: .45; cursor: not-allowed !important; }
+  /* Flights page: restrained inline expand/collapse */
+  .ft-expand { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .24s ease; }
+  .ft-expand > div { min-height: 0; overflow: hidden; visibility: hidden; transition: visibility 0s linear .24s; }
+  .ft-card[data-open="true"] .ft-expand { grid-template-rows: 1fr; }
+  .ft-card[data-open="true"] .ft-expand > div { visibility: visible; transition: visibility 0s; }
+  .ft-chev { transition: transform .24s ease; }
+  .ft-card[data-open="true"] .ft-chev { transform: rotate(180deg); }
+  @keyframes ft-ping { 0% { transform: scale(.6); opacity: .55; } 100% { transform: scale(1.5); opacity: 0; } }
+  .ft-ping { transform-box: fill-box; transform-origin: center; animation: ft-ping 2.4s ease-out infinite; }
+  @keyframes ft-flash { 0%, 60% { box-shadow: 0 0 0 3px rgb(var(--secondary) / .6); } 100% { box-shadow: 0 0 0 0 rgb(var(--secondary) / 0); } }
+  .ft-flash { animation: ft-flash 1.8s ease-out 1; }
+  @media (prefers-reduced-motion: reduce) {
+    .ft-expand, .ft-expand > div, .ft-chev { transition: none; }
+    .ft-ping, .ft-flash, .animate-pulse { animation: none; }
+  }
+  /* Flights map (Leaflet) themed with the dashboard tokens */
+  .leaflet-container { background: rgb(var(--surface-container-low)); font-family: Inter, sans-serif; }
+  :root[data-theme="dark"] .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6); }
+  :root:not([data-theme="dark"]) .leaflet-tile-pane { filter: saturate(.55) brightness(1.03); }
+  .leaflet-container img.leaflet-tile, .leaflet-container .leaflet-marker-icon { max-width: none !important; max-height: none !important; }
+  .leaflet-container svg { max-width: none !important; }
+  .leaflet-bar { border: 1px solid rgb(var(--outline-variant)) !important; box-shadow: none !important; }
+  .leaflet-bar a { background: rgb(var(--surface-container-lowest)) !important; color: rgb(var(--on-surface)) !important; border-bottom-color: rgb(var(--outline-variant)) !important; }
+  .leaflet-control-attribution { background: rgb(var(--surface-container-lowest) / .85) !important; color: rgb(var(--on-surface-variant)) !important; font-size: 10px; }
+  .leaflet-control-attribution a { color: rgb(var(--secondary)) !important; }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: rgb(var(--surface-container-lowest)); color: rgb(var(--on-surface)); box-shadow: 0 4px 14px rgb(0 0 0 / .18); }
+  .leaflet-popup-content { margin: 10px 12px; }
+  .leaflet-container a.leaflet-popup-close-button { color: rgb(var(--on-surface-variant)); }
+  .leaflet-tooltip { background: rgb(var(--surface-container-lowest)); color: rgb(var(--on-surface)); border-color: rgb(var(--outline-variant)); font-size: 11px; }
+  .leaflet-tooltip.ft-ap-label { background: transparent; border: 0; box-shadow: none; padding: 0; font-weight: 700; font-size: 10px; color: rgb(var(--on-surface));
+    text-shadow: 0 0 3px rgb(var(--surface-container-lowest)), 0 0 3px rgb(var(--surface-container-lowest)); }
+  .leaflet-tooltip.ft-ap-label::before { display: none; }
+  .ft-ap { stroke: rgb(var(--primary)); fill: rgb(var(--surface-container-lowest)); fill-opacity: 1; }
+  .ft-ap-home { stroke: rgb(var(--secondary)); fill: rgb(var(--secondary)); }
+  .ft-mk-wrap { background: none; border: 0; }
+  /* Marker colour = flight status; ring style = position freshness. Same tokens in both themes. */
+  .ft-route, .ft-mk, .ft-key { --mk: var(--secondary); }
+  .ft-cat-ontime { --mk: var(--secondary); }
+  .ft-cat-delayed { --mk: var(--error); }
+  .ft-cat-outbound { --mk: var(--primary); }
+  .ft-cat-landed { --mk: var(--on-tertiary-container); }
+  .ft-cat-unknown { --mk: var(--outline); }
+  .ft-route { stroke: rgb(var(--mk)); stroke-opacity: .55; }
+  .ft-mk { position: relative; display: flex; align-items: center; justify-content: center; border-radius: 9999px; cursor: pointer;
+    background: linear-gradient(rgb(var(--mk) / .16), rgb(var(--mk) / .16)), rgb(var(--surface-container-lowest)); box-shadow: 0 0 0 2px rgb(var(--mk)); }
+  .ft-mk svg { width: 72%; height: 72%; fill: rgb(var(--mk)); }
+  .ft-key { display: inline-block; width: 10px; height: 10px; border-radius: 9999px;
+    background: linear-gradient(rgb(var(--mk) / .2), rgb(var(--mk) / .2)), rgb(var(--surface-container-lowest)); box-shadow: 0 0 0 1.5px rgb(var(--mk)); }
+  .ft-fr-stale { box-shadow: none; outline: 2px dashed rgb(var(--mk)); outline-offset: 0; opacity: .72; }
+  .ft-key.ft-fr-stale { outline-width: 1.5px; }
+  .ft-fr-grounded { border-radius: 4px; }
+  .ft-mk.ft-mk-sel { box-shadow: 0 0 0 2px rgb(var(--mk)), 0 0 0 7px rgb(var(--mk) / .28); opacity: 1; }
+  .ft-mk.ft-fr-stale.ft-mk-sel { outline-offset: 2px; box-shadow: 0 0 0 7px rgb(var(--mk) / .22); }
+  .ft-mk-tag { position: absolute; left: 100%; top: 50%; transform: translate(5px, -50%); font: 600 10px/1.4 Inter, sans-serif; white-space: nowrap;
+    background: rgb(var(--surface-container-lowest)); color: rgb(var(--on-surface)); padding: 0 4px; border-radius: 3px; box-shadow: 0 1px 2px rgb(0 0 0 / .25); }
+  .ft-card.ft-selected, tr.ft-selected { outline: 2px solid rgb(var(--secondary)); outline-offset: 2px; }
+  .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+</style>
+<script src="https://cdn.tailwindcss.com/3.4.16"></script>
+<script>
+  (function () {
+    var c = function (v) { return 'rgb(var(--' + v + ') / <alpha-value>)'; };
+    var names = ['background', 'surface-container-lowest', 'surface-container-low', 'surface-container', 'surface-container-high',
+      'on-surface', 'on-surface-variant', 'primary', 'on-primary', 'inverse-surface', 'primary-fixed', 'on-primary-fixed',
+      'secondary', 'on-secondary', 'secondary-fixed', 'secondary-fixed-dim', 'on-secondary-fixed', 'on-secondary-fixed-variant',
+      'tertiary-fixed', 'tertiary-fixed-dim', 'on-tertiary-fixed-variant', 'on-tertiary-container',
+      'error', 'error-container', 'on-error-container', 'outline', 'outline-variant'];
+    var colors = {};
+    names.forEach(function (n) { colors[n] = c(n); });
+    tailwind.config = {
+      theme: { extend: {
+        colors: colors,
+        borderRadius: { DEFAULT: '0.125rem', lg: '0.25rem', xl: '0.5rem', full: '0.75rem' },
+        spacing: { 'space-xl': '2rem', 'gutter-desktop': '1.5rem', margin: '1rem', 'margin-desktop': '2rem', 'space-sm': '0.5rem',
+          'space-xs': '0.25rem', 'space-md': '0.75rem', gutter: '1rem', 'space-lg': '1.25rem' },
+        fontFamily: { 'headline-sm': ['Inter'], 'label-md': ['Inter'], 'label-sm': ['Inter'], 'body-md': ['Inter'],
+          'body-sm': ['Inter'], 'headline-lg': ['Inter'], 'data-mono': ['Inter'] },
+        fontSize: {
+          'label-md': ['0.8125rem', { lineHeight: '1.125rem', letterSpacing: '0.01em', fontWeight: '500' }],
+          'headline-sm': ['1rem', { lineHeight: '1.5rem', letterSpacing: '-0.01em', fontWeight: '600' }],
+          'label-sm': ['0.6875rem', { lineHeight: '1rem', letterSpacing: '0.04em', fontWeight: '600' }],
+          'body-md': ['0.875rem', { lineHeight: '1.375rem', letterSpacing: '0em', fontWeight: '400' }],
+          'headline-lg': ['1.75rem', { lineHeight: '2.25rem', letterSpacing: '-0.025em', fontWeight: '600' }],
+          'body-sm': ['0.8125rem', { lineHeight: '1.25rem', letterSpacing: '0.005em', fontWeight: '400' }],
+          'data-mono': ['0.8125rem', { lineHeight: '1.125rem', letterSpacing: '-0.01em', fontWeight: '500' }]
+        }
+      } }
+    };
+    try { if (localStorage.getItem('ft-theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark'); } catch (e) {}
+  })();
+</script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="/flight-sort.js"></script>
+<script src="/flight-position.js"></script>
+<script src="/grouping-bundle.js"></script>
+<script src="/cab-suggestions.js"></script>
+<script src="/mock-bridge.js"></script>
+</head>
+<body class="bg-background font-body-md text-body-md text-on-surface antialiased">
+
+<!-- ===== SIDEBAR ===== -->
+<aside class="hidden lg:flex fixed top-0 left-0 h-screen w-64 bg-surface-container-lowest border-r border-outline-variant/30 z-50 flex-col justify-between">
+  <div class="flex flex-col">
+    <div class="h-16 px-space-md flex items-center gap-space-sm border-b border-outline-variant/20">
+      <div class="h-8 w-8 rounded-lg bg-primary text-on-primary flex items-center justify-center"><span class="material-symbols-outlined text-[18px]">flight_land</span></div>
+      <div class="flex flex-col min-w-0">
+        <span class="font-headline-sm text-headline-sm text-primary tracking-tight truncate leading-none">Flight Tracker</span>
+        <span class="font-label-sm text-label-sm text-secondary uppercase font-bold tracking-wider mt-0.5"><span data-f="home">BLR</span> Operations</span>
+      </div>
+    </div>
+    <div class="px-space-md py-space-sm"><span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant/70 px-space-xs">Navigation</span></div>
+    <nav class="flex flex-col gap-space-xs px-space-sm">
+      <a data-page="overview"      href="#overview"      class="flex items-center gap-space-sm px-space-sm py-2 rounded-lg font-label-md text-label-md transition-colors"><span class="material-symbols-outlined text-[18px]">dashboard</span><span>Overview</span></a>
+      <a data-page="flights"       href="#flights"       class="flex items-center gap-space-sm px-space-sm py-2 rounded-lg font-label-md text-label-md transition-colors"><span class="material-symbols-outlined text-[18px]">flight</span><span>Flights</span></a>
+      <a data-page="cab-suggestions" href="#cab-suggestions" class="flex items-center gap-space-sm px-space-sm py-2 rounded-lg font-label-md text-label-md transition-colors"><span class="material-symbols-outlined text-[18px]">local_taxi</span><span>Cab Suggestions</span></a>
+      <a data-page="notifications" href="#notifications" class="flex items-center gap-space-sm px-space-sm py-2 rounded-lg font-label-md text-label-md transition-colors"><span class="material-symbols-outlined text-[18px]">notifications</span><span>Notifications</span></a>
+      <a data-page="api-usage"     href="#api-usage"     class="flex items-center gap-space-sm px-space-sm py-2 rounded-lg font-label-md text-label-md transition-colors"><span class="material-symbols-outlined text-[18px]">terminal</span><span>API Usage</span></a>
+      <a data-page="settings"      href="#settings"      class="flex items-center gap-space-sm px-space-sm py-2 rounded-lg font-label-md text-label-md transition-colors"><span class="material-symbols-outlined text-[18px]">tune</span><span>Settings</span></a>
+    </nav>
+  </div>
+  <div class="p-space-sm border-t border-outline-variant/20 bg-surface-container-low/40">
+    <div class="flex items-center justify-between px-space-xs py-1">
+      <div class="flex items-center gap-1.5"><span id="engine-dot" class="w-2 h-2 rounded-full bg-outline"></span><span id="engine-label" class="font-label-sm text-label-sm text-on-surface font-medium">Engine status…</span></div>
+      <span class="font-data-mono text-on-surface-variant/80 text-[10px]">5m tick</span>
+    </div>
+    <div class="flex items-center justify-between px-space-xs pt-1 border-t border-outline-variant/10">
+      <span class="font-label-sm text-label-sm text-on-surface-variant">Zone</span>
+      <span class="font-data-mono text-data-mono text-on-surface-variant font-medium">Asia/Kolkata (IST)</span>
+    </div>
+    <div class="mt-1 px-1 py-1 rounded bg-secondary-fixed border border-secondary-fixed-dim/40 text-center">
+      <span class="font-label-sm text-[10px] uppercase tracking-wider text-on-secondary-fixed font-semibold">⚗ Local Preview · Mock Data</span>
+    </div>
+  </div>
+</aside>
+
+<!-- ===== MAIN AREA ===== -->
+<div class="lg:pl-64 flex flex-col min-h-screen">
+
+  <!-- ===== HEADER ===== -->
+  <header class="fixed top-0 left-0 lg:left-64 right-0 h-16 bg-surface-container-lowest/90 backdrop-blur-md border-b border-outline-variant/30 z-40 px-gutter flex items-center justify-between">
+    <div class="flex flex-col min-w-0">
+      <span id="page-title" class="font-headline-sm text-headline-sm text-primary leading-tight">Flight Operations</span>
+      <span id="page-subtitle" class="font-body-sm text-body-sm text-on-surface-variant hidden sm:inline truncate">Monitor arrivals, departures, and airport transfers</span>
+    </div>
+    <div class="flex items-center gap-space-md">
+      <div class="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded bg-surface-container-low border border-outline-variant/40">
+        <span class="material-symbols-outlined text-[16px] text-on-surface-variant">calendar_today</span>
+        <span id="today" class="font-data-mono text-data-mono text-on-surface font-medium">Today</span>
+      </div>
+      <div id="sync-chip" class="hidden lg:flex items-center gap-1.5 px-2 py-0.5 rounded bg-tertiary-fixed/20 border border-tertiary-fixed-dim/40 text-on-tertiary-fixed-variant">
+        <span id="sync-dot" class="w-1.5 h-1.5 rounded-full bg-on-tertiary-container"></span>
+        <span id="sync-label" class="font-label-sm text-label-sm uppercase font-semibold">Live Syncing (OpenSky / ADB)</span>
+      </div>
+      <div class="flex items-center gap-space-xs text-on-surface-variant">
+        <span id="synced-ago" class="font-data-mono text-data-mono hidden xl:inline">Loading…</span>
+        <button data-refresh class="p-1.5 rounded hover:bg-surface-container-high hover:text-on-surface transition-colors" title="Refresh data" type="button"><span class="material-symbols-outlined text-[18px]">refresh</span></button>
+        <button id="theme-toggle-btn" class="p-1.5 rounded hover:bg-surface-container-high hover:text-on-surface transition-colors flex items-center justify-center" title="Toggle theme" aria-label="Toggle dark mode" type="button"><span id="theme-icon" class="material-symbols-outlined text-[18px]">dark_mode</span></button>
+      </div>
+      <div class="h-5 w-px bg-outline-variant/30 hidden sm:block"></div>
+      <div class="flex items-center gap-space-sm pl-space-xs" title="Sign-in is not available yet">
+        <div class="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center ring-1 ring-outline-variant/40 ft-off"><span class="material-symbols-outlined text-[18px] text-on-surface-variant">person</span></div>
+        <div class="hidden md:flex flex-col min-w-0 text-left ft-off">
+          <span class="font-label-md text-label-md text-on-surface leading-tight">Coordinator</span>
+          <span class="font-label-sm text-label-sm text-on-surface-variant">Profile not available</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===== CONTENT ===== -->
+  <main class="relative mt-16 bg-background flex-1 w-full px-gutter py-space-md">
+    <div id="banner" class="hidden mb-space-md p-3 rounded-lg bg-error-container text-on-error-container font-body-sm text-body-sm"></div>
+
+    <!-- ==================== PAGE: OVERVIEW ==================== -->
+    <div id="page-overview" class="flex flex-col w-full">
+      <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 bg-surface-container-lowest rounded-xl shadow-sm mb-space-lg">
+        <div class="p-space-lg flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant font-semibold">Active Flights</span>
+            <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-surface-container-high text-secondary font-data-mono text-[11px]"><span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>Active rows</span>
+          </div>
+          <div class="mt-space-sm flex items-baseline gap-space-xs"><span id="m-tracked" class="font-headline-lg text-headline-lg text-on-surface font-semibold tracking-tight">–</span><span class="font-headline-sm text-headline-sm text-on-surface-variant font-medium">Tracked</span></div>
+          <div class="mt-space-xs flex items-center justify-between font-body-sm text-body-sm gap-2">
+            <span id="m-split" class="text-on-surface-variant"></span>
+            <span id="m-onsched" class="font-label-sm text-label-sm text-on-tertiary-container font-semibold"></span>
+          </div>
+        </div>
+        <div class="p-space-lg flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant font-semibold">Arriving <span data-f="home">BLR</span></span>
+            <span id="m-terminals" class="font-data-mono text-data-mono text-on-surface-variant"></span>
+          </div>
+          <div class="mt-space-sm flex items-baseline gap-space-xs"><span id="m-inbound" class="font-headline-lg text-headline-lg text-on-surface font-semibold tracking-tight">–</span><span class="font-headline-sm text-headline-sm text-on-surface-variant font-medium">Inbound</span></div>
+          <div class="mt-space-xs flex items-center justify-between font-body-sm text-body-sm gap-2">
+            <span id="m-next" class="text-on-surface-variant truncate"></span>
+            <span id="m-next-term" class="hidden font-data-mono text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant font-medium"></span>
+          </div>
+        </div>
+        <div class="p-space-lg flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant font-semibold">Delay Monitoring</span>
+            <span id="m-impacted-chip" class="hidden inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-error-container text-on-error-container font-label-sm text-label-sm font-semibold"><span class="w-1.5 h-1.5 rounded-full bg-error"></span><span id="m-impacted-chip-n"></span> Impacted</span>
+          </div>
+          <div class="mt-space-sm flex items-baseline gap-space-xs"><span id="m-alerts" class="font-headline-lg text-headline-lg text-on-surface font-semibold tracking-tight">–</span><span class="font-headline-sm text-headline-sm text-on-surface-variant font-medium">Alerts</span></div>
+          <div class="mt-space-xs flex items-center justify-between font-body-sm text-body-sm gap-2">
+            <span id="m-delays" class="text-on-surface-variant font-data-mono text-[12px] truncate"></span>
+            <span class="font-label-sm text-label-sm text-secondary font-medium whitespace-nowrap">Cab suggestions refresh each tick</span>
+          </div>
+        </div>
+        <div class="p-space-lg flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant font-semibold">Airport Transit</span>
+            <span class="font-data-mono text-[11px] text-on-surface-variant">Suggestions only</span>
+          </div>
+          <div class="mt-space-sm flex items-baseline gap-space-xs"><span id="m-groups" class="font-headline-lg text-headline-lg text-on-surface font-semibold tracking-tight">–</span><span class="font-headline-sm text-headline-sm text-on-surface-variant font-medium">Shared Suggestions</span></div>
+          <div class="mt-space-xs flex items-center justify-between font-body-sm text-body-sm gap-2">
+            <span id="m-guests" class="text-on-surface-variant"></span>
+            <span class="font-label-sm text-label-sm font-medium text-on-surface ft-off" title="Wait times are not recorded yet">Avg wait —</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-gutter-desktop items-start">
+        <div class="lg:col-span-8 flex flex-col gap-space-md min-w-0">
+          <div class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm flex flex-col gap-space-sm">
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-space-sm">
+              <div class="relative flex-1 sm:min-w-[240px]">
+                <span class="material-symbols-outlined absolute left-3 top-2.5 text-on-surface-variant text-[18px]">search</span>
+                <input id="search" class="w-full h-9 pl-9 pr-space-md bg-surface-container-low text-on-surface font-body-sm text-body-sm rounded-lg placeholder:text-on-surface-variant/60 focus:bg-surface-container-lowest focus:ring-1 focus:ring-secondary outline-none transition-all" placeholder="Search flight, guest or status..." type="text" aria-label="Search flights">
+              </div>
+              <div class="flex items-center gap-space-xs self-stretch sm:self-auto justify-end">
+                <button data-refresh class="h-9 w-9 rounded-lg bg-surface-container-low text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors flex items-center justify-center" title="Refresh data"><span class="material-symbols-outlined text-[18px]">cached</span></button>
+                <a data-page="flights" href="#flights" class="h-9 px-3.5 rounded-lg bg-primary text-on-primary font-label-md text-label-md flex items-center gap-1.5 whitespace-nowrap"><span>All <span id="all-count">0</span> Flights</span><span class="material-symbols-outlined text-[14px]">arrow_forward</span></a>
+              </div>
+            </div>
+            <div class="flex items-center justify-between pt-space-xs gap-2">
+              <div class="flex items-center gap-1 bg-surface-container-low p-1 rounded-lg overflow-x-auto" role="tablist">
+                <button data-dir="ALL" role="tab" class="px-3 py-1 rounded font-label-sm text-label-sm transition-all whitespace-nowrap">All Inbound / Outbound (<span data-count="ALL">0</span>)</button>
+                <button data-dir="ARR" role="tab" class="px-3 py-1 rounded font-label-sm text-label-sm transition-colors whitespace-nowrap">Arrivals <span data-f="home">BLR</span> (<span data-count="ARR">0</span>)</button>
+                <button data-dir="DEP" role="tab" class="px-3 py-1 rounded font-label-sm text-label-sm transition-colors whitespace-nowrap">Departures <span data-f="home">BLR</span> (<span data-count="DEP">0</span>)</button>
+              </div>
+              <div class="hidden md:flex items-center gap-space-sm font-data-mono text-[11px] text-on-surface-variant">
+                <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-on-tertiary-container"></span>Live Tracking (ADS-B)</span>
+                <span>•</span><span>Tick every 5 min</span>
+              </div>
+            </div>
+          </div>
+          <div class="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="bg-surface-container-low/60 font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">
+                    <th class="py-3 px-4 font-semibold">Flight / Carrier</th>
+                    <th class="py-3 px-3 font-semibold">Faculty Guest</th>
+                    <th class="py-3 px-3 font-semibold">Route (<span data-f="home">BLR</span>)</th>
+                    <th class="py-3 px-3 font-semibold">Sched</th>
+                    <th class="py-3 px-3 font-semibold">Estimated / Act</th>
+                    <th class="py-3 px-3 font-semibold">Transit Status</th>
+                    <th class="py-3 px-3 font-semibold">Cab Suggestion</th>
+                    <th class="py-3 pr-4 pl-2 text-right font-semibold">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="rows" class="text-on-surface font-body-sm text-body-sm">
+                  <tr><td colspan="8" class="py-6 px-4 text-center text-on-surface-variant">Loading flights…</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="px-space-md py-3 bg-surface-container-low/40 flex flex-col sm:flex-row items-center justify-between gap-2 font-body-sm text-body-sm text-on-surface-variant">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-[16px] text-secondary">verified_user</span>
+                <span>Data: <strong>OpenSky ADS-B</strong> (live positions) &amp; <strong>AeroDataBox</strong> (flight status API).</span>
+              </div>
+              <div id="attribution" class="font-data-mono text-[11px] text-on-surface-variant/80">Flight status data: AeroDataBox (https://aerodatabox.com)</div>
+            </div>
+          </div>
+          <div class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm flex flex-col gap-space-sm">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2"><span class="material-symbols-outlined text-[18px] text-primary">pin_drop</span><span class="font-label-md text-label-md font-semibold text-on-surface"><span data-f="home">BLR</span> Active Curbside Zone</span></div>
+              <span class="font-data-mono text-[11px] text-on-surface-variant ft-off">Congestion data not available</span>
+            </div>
+            <div class="w-full h-44 rounded-lg bg-surface-container-low border border-dashed border-outline-variant/60 flex flex-col items-center justify-center gap-1 text-on-surface-variant ft-off" title="Not available yet">
+              <span class="material-symbols-outlined text-[28px]">map</span>
+              <span class="font-label-md text-label-md">Curbside map not available yet</span>
+              <span class="font-body-sm text-[12px]">Pickup suggestions are on the Cab Suggestions page</span>
+            </div>
+          </div>
+        </div>
+        <div class="lg:col-span-4 flex flex-col gap-space-md min-w-0">
+          <div class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md flex flex-col gap-space-sm">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[18px] text-error">notification_important</span><span class="font-label-md text-label-md font-semibold text-on-surface">Operations Attention</span></div>
+              <span id="attn-count" class="font-data-mono text-[11px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant font-semibold">0 Triggers</span>
+            </div>
+            <div id="attention" class="flex flex-col gap-space-xs mt-1"></div>
+          </div>
+          <div class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md flex flex-col gap-space-sm">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[18px] text-primary">schedule</span><span class="font-label-md text-label-md font-semibold text-on-surface">Tick Engine Activity</span></div>
+              <span class="font-data-mono text-[11px] text-on-surface-variant">Log sheet</span>
+            </div>
+            <div id="activity" class="relative pl-4 space-y-3.5 before:content-[''] before:absolute before:left-1 before:top-2 before:bottom-2 before:w-0.5 before:bg-surface-container"></div>
+          </div>
+          <div class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md flex flex-col gap-space-sm">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[18px] text-primary">data_thresholding</span><span class="font-label-md text-label-md font-semibold text-on-surface">Telemetry &amp; API Budget</span></div>
+              <span id="budget-health" class="font-data-mono text-[11px] text-on-surface-variant font-semibold">–</span>
+            </div>
+            <div class="flex flex-col gap-space-xs font-body-sm text-body-sm">
+              <div class="flex flex-col gap-1 p-2.5 rounded-lg bg-surface-container-low">
+                <div class="flex justify-between items-baseline font-label-sm text-label-sm gap-2">
+                  <span class="text-on-surface font-semibold">AeroDataBox API Quota</span>
+                  <span id="budget-units" class="font-data-mono text-on-surface font-semibold text-right">–</span>
+                </div>
+                <div class="w-full h-1.5 bg-surface-container rounded-full overflow-hidden"><div id="budget-bar" class="h-full bg-secondary rounded-full" style="width:0%"></div></div>
+                <span id="budget-note" class="text-[10px] text-on-surface-variant"></span>
+              </div>
+              <div class="flex items-center justify-between p-2.5 rounded-lg bg-surface-container-low ft-off" title="Not monitored yet">
+                <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-outline"></span>
+                  <div class="flex flex-col"><span class="font-label-sm text-label-sm font-semibold text-on-surface">OpenSky Network</span><span class="text-[10px] text-on-surface-variant">Availability not monitored</span></div></div>
+                <span class="font-data-mono text-[11px] text-on-surface-variant">—</span>
+              </div>
+              <div class="flex items-center justify-between p-2.5 rounded-lg bg-surface-container-low ft-off" title="Not monitored yet">
+                <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-outline"></span>
+                  <div class="flex flex-col"><span class="font-label-sm text-label-sm font-semibold text-on-surface">Telegram Dispatch</span><span class="text-[10px] text-on-surface-variant">Delivery errors appear on the Log sheet</span></div></div>
+                <span class="font-data-mono text-[11px] text-on-surface-variant">—</span>
+              </div>
+            </div>
+            <div class="pt-space-xs border-t border-outline-variant/10 flex items-center justify-between font-data-mono text-[11px] text-on-surface-variant">
+              <span>Engine interval: 5m 00s</span>
+              <span id="trigger-note" class="text-secondary font-medium"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== PAGE: FLIGHTS ==================== -->
+    <div id="page-flights" class="hidden flex flex-col w-full">
+      <!-- Sub-header / control bar (Stitch) -->
+      <div class="flex flex-col gap-space-md mb-space-lg">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-space-sm">
+          <div class="min-w-0">
+            <div class="flex items-center gap-space-xs text-on-surface-variant font-label-sm text-label-sm uppercase tracking-wider mb-1">
+              <span><span data-f="home">BLR</span> Terminal Ops</span>
+              <span class="material-symbols-outlined text-[14px]">chevron_right</span>
+              <span class="text-secondary font-semibold">Air-to-Ground Telemetry</span>
+            </div>
+            <h1 class="font-headline-lg text-headline-lg text-primary tracking-tight">Flight Journeys &amp; Live Tracking</h1>
+            <p class="font-body-md text-body-md text-on-surface-variant mt-0.5">Route telemetry, journey progress and cab coordination for visiting faculty, soonest arrival first.</p>
+          </div>
+          <div class="flex items-center gap-space-xs flex-wrap">
+            <div id="fl-mock-chip" class="hidden items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary-fixed text-on-secondary-fixed shadow-sm" title="Every flight, telemetry value and cab detail on this page is synthetic">
+              <span class="material-symbols-outlined text-[16px]">science</span>
+              <span class="font-data-mono text-data-mono font-medium">Mock data · not live</span>
+            </div>
+            <button id="fl-sim-eta" class="hidden items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-container-lowest text-on-surface shadow-sm hover:bg-surface-container-low font-label-md text-label-md transition-colors" type="button" title="Preview only: delays the soonest inbound arrival by 60 min and refreshes">
+              <span class="material-symbols-outlined text-[16px]">update</span><span>Simulate ETA change</span>
+            </button>
+            <button disabled class="flex items-center gap-1 px-3 py-1.5 bg-primary text-on-primary rounded-lg font-label-md text-label-md shadow-sm ft-off" type="button" title="Guests are added on the Flights sheet; not available here">
+              <span class="material-symbols-outlined text-[16px]">add</span><span>Track New Guest</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Filters and query ribbon -->
+        <div class="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-space-sm bg-surface-container-lowest p-space-sm rounded-xl shadow-sm">
+          <div class="relative flex-1 lg:min-w-[240px] lg:max-w-sm">
+            <span class="material-symbols-outlined absolute left-3 top-2.5 text-[18px] text-on-surface-variant">search</span>
+            <input id="fl-search" class="w-full h-9 pl-9 pr-3 rounded-lg bg-surface-container-low font-body-sm text-body-sm text-on-surface placeholder:text-on-surface-variant/70 focus:outline-none focus:ring-1 focus:ring-secondary focus:bg-surface-container-lowest transition-all" placeholder="Search flight (e.g. BA 118), faculty name, origin or destination…" type="search" aria-label="Search flights">
+          </div>
+          <div id="fl-filters" class="flex items-center gap-1 overflow-x-auto py-1 min-w-0" role="tablist" aria-label="Flight filter"></div>
+          <div class="flex items-center gap-space-xs self-end lg:self-auto shrink-0">
+            <label class="flex items-center gap-1 font-label-sm text-label-sm text-on-surface-variant">
+              <span class="material-symbols-outlined text-[16px]">sort</span>
+              <select id="fl-sort" class="h-8 pl-2 pr-6 rounded-lg bg-surface-container-low text-on-surface font-label-sm text-label-sm border-0 focus:ring-1 focus:ring-secondary" aria-label="Sort flights">
+                <option value="soonest">Soonest arrival</option>
+                <option value="latest">Latest arrival</option>
+                <option value="flight">Flight number</option>
+              </select>
+            </label>
+            <div class="flex items-center gap-1 p-0.5 bg-surface-container-low rounded-lg">
+              <button data-fl-view="cards" class="p-1.5 rounded-md transition-colors" title="Infographic journey cards" aria-label="Card view" type="button"><span class="material-symbols-outlined text-[16px]">view_agenda</span></button>
+              <button data-fl-view="table" class="p-1.5 rounded-md transition-colors" title="Tabular matrix view" aria-label="Table view" type="button"><span class="material-symbols-outlined text-[16px]">table_rows</span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shared flight map: every flight in the current filter/search with a usable reported position -->
+      <section id="fl-map-section" class="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden mb-space-lg" aria-label="Flight map">
+        <div class="px-space-md pt-2 pb-1 flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="material-symbols-outlined text-[18px] text-primary">map</span>
+            <h2 class="font-headline-sm text-headline-sm text-primary tracking-tight">Flight Map</h2>
+            <span id="fl-map-mock" class="hidden px-1.5 rounded bg-secondary-fixed text-on-secondary-fixed font-label-sm text-[10px] uppercase font-bold" title="Synthetic coordinates (local preview)">Mock coordinates · not live</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <button id="fl-map-fit" type="button" class="px-2 py-1 rounded font-label-sm text-label-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors flex items-center gap-1" title="Fit the map to the aircraft in this view"><span class="material-symbols-outlined text-[15px]">fit_screen</span>Fit</button>
+            <button id="fl-map-toggle" type="button" aria-expanded="true" aria-controls="fl-map-body" class="px-2 py-1 rounded font-label-sm text-label-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors flex items-center gap-1"><span class="material-symbols-outlined text-[15px]">expand_less</span><span>Hide map</span></button>
+          </div>
+        </div>
+        <div id="fl-map-body">
+          <div class="px-space-md pb-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-data-mono text-[11px] text-on-surface-variant">
+            <span class="flex items-center gap-1"><span class="ft-key ft-cat-ontime"></span>On time</span>
+            <span class="flex items-center gap-1"><span class="ft-key ft-cat-delayed"></span>Delayed / cancelled</span>
+            <span class="flex items-center gap-1"><span class="ft-key ft-cat-outbound"></span>Outbound</span>
+            <span class="flex items-center gap-1"><span class="ft-key ft-cat-landed"></span>Landed</span>
+            <span class="flex items-center gap-1"><span class="ft-key ft-cat-unknown"></span>Unverified</span>
+            <span class="text-outline-variant">|</span>
+            <span class="flex items-center gap-1"><span class="ft-key ft-cat-unknown"></span>Fresh (20 min or less)</span>
+            <span class="flex items-center gap-1"><span class="ft-key ft-cat-unknown ft-fr-stale"></span>Stale</span>
+            <span class="flex items-center gap-1"><span class="ft-key ft-cat-unknown ft-fr-grounded"></span>On ground</span>
+            <span class="flex items-center gap-1"><span class="w-3 border-t-2 border-dashed border-outline"></span>Planned route</span>
+          </div>
+          <div class="relative">
+            <div id="fl-map" class="h-64 sm:h-72 lg:h-80 w-full" role="region" aria-label="Map of monitored aircraft"></div>
+            <div id="fl-map-empty" class="hidden absolute inset-0 z-[450] flex items-center justify-center p-4 pointer-events-none">
+              <div class="px-3 py-2 rounded-lg bg-surface-container-lowest/95 shadow-sm text-center flex flex-col items-center gap-0.5">
+                <span class="material-symbols-outlined text-[22px] text-on-surface-variant">location_off</span>
+                <span id="fl-map-empty-title" class="font-label-md text-label-md text-on-surface">No usable aircraft coordinates</span>
+                <span id="fl-map-empty-sub" class="font-body-sm text-[12px] text-on-surface-variant"></span>
+              </div>
+            </div>
+            <div id="fl-map-fallback" class="hidden absolute inset-0 z-[460] flex items-center justify-center text-center p-4 font-body-sm text-body-sm text-on-surface-variant bg-surface-container-low">The map library could not load (offline?). The flight cards below are unaffected.</div>
+          </div>
+          <div class="px-space-md py-2 flex flex-wrap justify-between gap-2 font-data-mono text-[11px] text-on-surface-variant"><span id="fl-map-counts"></span><span>Positions from the last tracker tick · no extra provider calls</span></div>
+          <details id="fl-map-unplotted-wrap" class="px-space-md pb-space-sm">
+            <summary id="fl-map-unplotted-sum" class="cursor-pointer font-label-sm text-label-sm uppercase tracking-wider font-bold text-on-surface-variant">Not on the map</summary>
+            <div id="fl-map-unplotted" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1 pt-2"></div>
+          </details>
+        </div>
+      </section>
+
+      <!-- Primary operations grid -->
+      <div class="grid grid-cols-1 xl:grid-cols-12 gap-space-lg items-start">
+        <div class="xl:col-span-8 flex flex-col gap-space-sm min-w-0">
+          <div class="flex flex-wrap items-center justify-between gap-2 px-1">
+            <span id="fl-summary" class="font-data-mono text-data-mono text-on-surface-variant" aria-live="polite">0 flights</span>
+            <div id="fl-expand-ctl" class="flex items-center gap-1">
+              <button data-fl-expand="all" class="px-2 py-1 rounded font-label-sm text-label-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors flex items-center gap-1" type="button"><span class="material-symbols-outlined text-[15px]">unfold_more</span>Expand all</button>
+              <button data-fl-expand="none" class="px-2 py-1 rounded font-label-sm text-label-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors flex items-center gap-1" type="button"><span class="material-symbols-outlined text-[15px]">unfold_less</span>Collapse all</button>
+            </div>
+          </div>
+          <div id="fl-cards" class="flex flex-col gap-space-md"></div>
+          <div id="fl-table" class="hidden bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="bg-surface-container-low/60 font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">
+                    <th class="py-3 px-4 font-semibold">Flight</th>
+                    <th class="py-3 px-3 font-semibold">Faculty Guest</th>
+                    <th class="py-3 px-3 font-semibold">Dir</th>
+                    <th class="py-3 px-3 font-semibold">Route</th>
+                    <th class="py-3 px-3 font-semibold">Terminal</th>
+                    <th class="py-3 px-3 font-semibold">Scheduled</th>
+                    <th class="py-3 px-3 font-semibold">Estimated</th>
+                    <th class="py-3 px-3 font-semibold">Delay</th>
+                    <th class="py-3 px-3 font-semibold">Status</th>
+                    <th class="py-3 px-3 font-semibold">Source</th>
+                    <th class="py-3 px-3 font-semibold">Cab</th>
+                    <th class="py-3 px-3 font-semibold">Last Check</th>
+                  </tr>
+                </thead>
+                <tbody id="fl-rows" class="text-on-surface font-body-sm text-body-sm"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="px-1 flex flex-col sm:flex-row sm:items-center justify-between gap-1 font-data-mono text-[11px] text-on-surface-variant/80">
+            <span id="fl-attribution">Flight status data: AeroDataBox (https://aerodatabox.com)</span>
+            <span>Times in IST · <sup class="font-semibold">+1</sup> = next day</span>
+          </div>
+        </div>
+
+        <!-- Operations sidebar (below the cards on smaller screens) -->
+        <div class="xl:col-span-4 flex flex-col gap-space-md min-w-0">
+          <div class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm">
+            <div class="flex items-center justify-between pb-space-xs mb-space-sm">
+              <div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[18px] text-primary">local_taxi</span><h2 class="font-headline-sm text-headline-sm text-primary tracking-tight">Pickup Suggestions</h2></div>
+              <span id="ops-fleet-chip" class="font-label-sm text-label-sm font-bold px-2 py-0.5 rounded bg-surface-container text-on-surface-variant">Suggestions only</span>
+            </div>
+            <div id="ops-curbside" class="flex flex-col gap-space-xs"></div>
+          </div>
+          <div class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm">
+            <div class="flex items-center justify-between pb-space-xs mb-space-sm">
+              <div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[18px] text-secondary">flight_land</span><h2 class="font-headline-sm text-headline-sm text-primary tracking-tight">Upcoming Inbounds (<span data-f="home">BLR</span>)</h2></div>
+              <span class="font-data-mono text-data-mono text-on-surface-variant text-[11px]">Next 4 hrs</span>
+            </div>
+            <div id="ops-inbound" class="flex flex-col gap-space-xs"></div>
+          </div>
+          <div class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm">
+            <div class="flex items-center justify-between pb-space-xs mb-space-sm">
+              <div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[18px] text-primary">terminal</span><h2 class="font-headline-sm text-headline-sm text-primary tracking-tight">Flight &amp; Telemetry Activity</h2></div>
+              <span class="font-data-mono text-[11px] text-on-surface-variant">Log sheet</span>
+            </div>
+            <div id="ops-activity" class="space-y-2 font-data-mono text-[11px]"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== PAGE: CAB SUGGESTIONS ==================== -->
+    <!-- Recommendations only: computed from the tracker's grouping rules, never stored, assigned or sent. -->
+    <div id="page-cab-suggestions" class="hidden flex flex-col w-full max-w-5xl gap-space-md">
+      <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-space-sm">
+        <div class="min-w-0">
+          <h1 class="font-headline-lg text-headline-lg text-primary tracking-tight">Cab Suggestions</h1>
+          <p class="font-body-md text-body-md text-on-surface-variant mt-0.5">Which arriving people could reasonably share a cab?</p>
+        </div>
+        <span id="cs-mock" class="hidden items-center gap-1.5 self-start px-2.5 py-1 rounded-lg bg-secondary-fixed text-on-secondary-fixed font-label-sm text-label-sm" title="Every flight on this page is synthetic preview data">
+          <span class="material-symbols-outlined text-[15px]">science</span>Mock data · not live</span>
+      </div>
+      <div class="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-surface-container-low text-on-surface font-body-sm text-body-sm">
+        <span class="material-symbols-outlined text-[18px] text-secondary">info</span>
+        <span><strong class="font-semibold">Suggestion only — arrange transport manually.</strong> Nothing on this page books or assigns a cab, or contacts anyone.</span>
+      </div>
+      <section id="cs-alerts" class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md" aria-label="Transport-relevant changes"></section>
+      <div id="cs-summary" class="px-1 font-data-mono text-data-mono text-on-surface-variant" aria-live="polite"></div>
+      <section aria-label="Shared cab suggestions" class="flex flex-col gap-space-xs">
+        <h2 class="px-1 font-label-sm text-label-sm uppercase tracking-wider font-bold text-on-surface-variant">Could share a cab</h2>
+        <div id="cs-shared" class="grid grid-cols-1 md:grid-cols-2 gap-space-md"></div>
+      </section>
+      <section id="cs-individual-wrap" aria-label="Individual pickups" class="flex flex-col gap-space-xs">
+        <h2 class="px-1 font-label-sm text-label-sm uppercase tracking-wider font-bold text-on-surface-variant">Individual pickup suggested</h2>
+        <div id="cs-individual" class="grid grid-cols-1 md:grid-cols-2 gap-space-md"></div>
+      </section>
+      <details id="cs-excluded-wrap" class="bg-surface-container-lowest rounded-xl shadow-sm px-space-md py-space-sm">
+        <summary id="cs-excluded-sum" class="cursor-pointer font-label-sm text-label-sm uppercase tracking-wider font-bold text-on-surface-variant">Not suggested</summary>
+        <ul id="cs-excluded" class="divide-y divide-outline-variant/15 pt-1 font-body-sm text-[12.5px]"></ul>
+      </details>
+      <p id="cs-rules" class="px-1 font-data-mono text-[11px] text-on-surface-variant/90"></p>
+    </div>
+
+    <!-- ==================== PAGE: NOTIFICATIONS ==================== -->
+    <div id="page-notifications" class="hidden flex flex-col w-full">
+      <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 bg-surface-container-lowest rounded-xl shadow-sm mb-space-lg">
+        <div class="p-space-lg flex flex-col justify-between">
+          <span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant font-semibold">Total Notifications</span>
+          <div class="mt-space-sm flex items-baseline gap-space-xs"><span id="nf-total" class="font-headline-lg text-headline-lg text-on-surface font-semibold tracking-tight">–</span></div>
+        </div>
+        <div class="p-space-lg flex flex-col justify-between">
+          <span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant font-semibold">Info</span>
+          <div class="mt-space-sm flex items-baseline gap-space-xs"><span id="nf-info" class="font-headline-lg text-headline-lg text-on-tertiary-container font-semibold tracking-tight">–</span></div>
+        </div>
+        <div class="p-space-lg flex flex-col justify-between">
+          <span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant font-semibold">Warnings</span>
+          <div class="mt-space-sm flex items-baseline gap-space-xs"><span id="nf-warn" class="font-headline-lg text-headline-lg text-secondary font-semibold tracking-tight">–</span></div>
+        </div>
+        <div class="p-space-lg flex flex-col justify-between">
+          <span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant font-semibold">Errors</span>
+          <div class="mt-space-sm flex items-baseline gap-space-xs"><span id="nf-error" class="font-headline-lg text-headline-lg text-error font-semibold tracking-tight">–</span></div>
+        </div>
+      </section>
+      <div class="bg-surface-container-lowest rounded-xl p-space-md shadow-sm flex flex-col gap-space-sm mb-space-md">
+        <div class="flex flex-wrap items-center justify-between gap-space-sm">
+          <div class="flex items-center gap-1 bg-surface-container-low p-1 rounded-lg">
+            <button data-nf-level="ALL"   class="px-3 py-1 rounded font-label-sm text-label-sm transition-all whitespace-nowrap">All</button>
+            <button data-nf-level="INFO"  class="px-3 py-1 rounded font-label-sm text-label-sm transition-all whitespace-nowrap">Info</button>
+            <button data-nf-level="WARN"  class="px-3 py-1 rounded font-label-sm text-label-sm transition-all whitespace-nowrap">Warnings</button>
+            <button data-nf-level="ERROR" class="px-3 py-1 rounded font-label-sm text-label-sm transition-all whitespace-nowrap">Errors</button>
+          </div>
+          <div class="relative flex-1 sm:min-w-[200px] sm:max-w-[320px]">
+            <span class="material-symbols-outlined absolute left-3 top-2.5 text-on-surface-variant text-[18px]">search</span>
+            <input id="nf-search" class="w-full h-9 pl-9 pr-space-md bg-surface-container-low text-on-surface font-body-sm text-body-sm rounded-lg placeholder:text-on-surface-variant/60 focus:bg-surface-container-lowest focus:ring-1 focus:ring-secondary outline-none transition-all" placeholder="Search notifications…" type="text">
+          </div>
+        </div>
+      </div>
+      <div id="nf-list" class="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
+        <div class="py-6 px-4 text-center text-on-surface-variant font-body-sm">Loading…</div>
+      </div>
+    </div>
+
+    <!-- ==================== PAGE: API USAGE ==================== -->
+    <div id="page-api-usage" class="hidden flex flex-col w-full">
+      <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 bg-surface-container-lowest rounded-xl shadow-sm mb-space-lg">
+        <div class="p-space-lg flex flex-col justify-between">
+          <span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant font-semibold">Total Requests</span>
+          <div class="mt-space-sm flex items-baseline gap-space-xs"><span id="au-requests" class="font-headline-lg text-headline-lg text-on-surface font-semibold tracking-tight">–</span><span class="font-headline-sm text-headline-sm text-on-surface-variant font-medium">this period</span></div>
+        </div>
+        <div class="p-space-lg flex flex-col justify-between">
+          <span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant font-semibold">Units Consumed</span>
+          <div class="mt-space-sm flex items-baseline gap-space-xs"><span id="au-units" class="font-headline-lg text-headline-lg text-on-surface font-semibold tracking-tight">–</span><span class="font-headline-sm text-headline-sm text-on-surface-variant font-medium">/ <span id="au-limit">–</span></span></div>
+        </div>
+        <div class="p-space-lg flex flex-col justify-between">
+          <span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant font-semibold">Budget Remaining</span>
+          <div class="mt-space-sm flex items-baseline gap-space-xs"><span id="au-remaining" class="font-headline-lg text-headline-lg text-on-tertiary-container font-semibold tracking-tight">–</span><span class="font-headline-sm text-headline-sm text-on-surface-variant font-medium">units</span></div>
+        </div>
+        <div class="p-space-lg flex flex-col justify-between">
+          <span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant font-semibold">Health Status</span>
+          <div class="mt-space-sm flex items-baseline gap-space-xs"><span id="au-health" class="font-headline-lg text-headline-lg text-on-tertiary-container font-semibold tracking-tight">–</span></div>
+        </div>
+      </section>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-gutter-desktop mb-space-md">
+        <div id="au-adb-card" class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md flex flex-col gap-space-sm"></div>
+        <div id="au-opensky-card" class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md flex flex-col gap-space-sm"></div>
+        <div id="au-telegram-card" class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md flex flex-col gap-space-sm"></div>
+      </div>
+      <div class="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
+        <div class="px-space-md py-3 border-b border-outline-variant/20 flex items-center justify-between">
+          <div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[18px] text-primary">history</span><span class="font-label-md text-label-md font-semibold text-on-surface">Recent API Requests</span></div>
+          <span class="font-data-mono text-[11px] text-on-surface-variant/60">Mock Data</span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="bg-surface-container-low/60 font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">
+                <th class="py-3 px-4 font-semibold">Time (IST)</th>
+                <th class="py-3 px-3 font-semibold">Provider</th>
+                <th class="py-3 px-3 font-semibold">Endpoint</th>
+                <th class="py-3 px-3 font-semibold">Flight</th>
+                <th class="py-3 px-3 font-semibold">Units</th>
+                <th class="py-3 px-3 font-semibold">Response</th>
+                <th class="py-3 px-3 font-semibold">Status</th>
+              </tr>
+            </thead>
+            <tbody id="au-rows" class="text-on-surface font-body-sm text-body-sm">
+              <tr><td colspan="7" class="py-6 px-4 text-center text-on-surface-variant">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== PAGE: SETTINGS ==================== -->
+    <div id="page-settings" class="hidden flex flex-col w-full">
+      <div class="mb-space-md p-3 rounded-lg bg-surface-container-low border border-outline-variant/30 flex items-center gap-2 font-body-sm text-body-sm text-on-surface-variant">
+        <span class="material-symbols-outlined text-[16px] text-secondary">info</span>
+        <span>Settings are read-only in the local preview. In production, configure values in the <strong>Config sheet</strong> or <strong>script properties</strong>.</span>
+      </div>
+      <div id="settings-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop"></div>
+    </div>
+
+    <!-- ===== ASSISTANT (same as original DashboardPage.html) ===== -->
+    <div class="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
+      <div id="flight-assistant-card" class="hidden w-[360px] max-w-[calc(100vw-2rem)] bg-surface-container-lowest border border-outline-variant/30 rounded-xl shadow-xl overflow-hidden flex-col">
+        <div class="bg-surface-container-low/70 px-4 py-3 border-b border-outline-variant/20 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="w-6 h-6 rounded bg-primary text-on-primary flex items-center justify-center"><span class="material-symbols-outlined text-[14px]">auto_awesome</span></div>
+            <div class="flex flex-col">
+              <span class="font-label-md text-label-md font-semibold text-on-surface leading-none">Operations Assistant</span>
+              <div class="flex items-center gap-1.5 mt-0.5"><span id="assistant-dot" class="w-1.5 h-1.5 rounded-full bg-outline"></span><span id="assistant-state" class="font-label-sm text-[10px] text-on-surface-variant">Not connected</span></div>
+            </div>
+          </div>
+          <button id="assistant-close" class="p-1 text-on-surface-variant hover:text-on-surface rounded hover:bg-surface-container transition-colors" title="Minimize assistant" type="button"><span class="material-symbols-outlined text-[16px]">close</span></button>
+        </div>
+        <div id="assistant-thread" class="p-4 flex flex-col gap-3 max-h-[380px] overflow-y-auto">
+          <div class="p-3 rounded-lg bg-surface-container-low/60 border border-outline-variant/10 text-on-surface font-body-sm text-body-sm leading-relaxed">Hello. How can I assist with today's arrivals or cab schedules?</div>
+          <div class="flex flex-col gap-1.5">
+            <span class="font-label-sm text-[10px] uppercase tracking-wider text-on-surface-variant font-semibold px-0.5">Suggested inquiries</span>
+            <div class="flex flex-col gap-1.5">
+              <button data-suggest class="text-left px-2.5 py-1.5 rounded-lg bg-surface-container-low text-on-surface text-[12px] font-label-md hover:bg-surface-container hover:text-secondary transition-colors flex items-center justify-between group"><span>Which flights are delayed today?</span><span class="material-symbols-outlined text-[13px] text-on-surface-variant group-hover:text-secondary">arrow_forward</span></button>
+              <button data-suggest class="text-left px-2.5 py-1.5 rounded-lg bg-surface-container-low text-on-surface text-[12px] font-label-md hover:bg-surface-container hover:text-secondary transition-colors flex items-center justify-between group"><span>Summarize today's arrivals.</span><span class="material-symbols-outlined text-[13px] text-on-surface-variant group-hover:text-secondary">arrow_forward</span></button>
+              <button data-suggest class="text-left px-2.5 py-1.5 rounded-lg bg-surface-container-low text-on-surface text-[12px] font-label-md hover:bg-surface-container hover:text-secondary transition-colors flex items-center justify-between group"><span>Which arrivals could share a cab?</span><span class="material-symbols-outlined text-[13px] text-on-surface-variant group-hover:text-secondary">arrow_forward</span></button>
+              <button data-suggest class="text-left px-2.5 py-1.5 rounded-lg bg-surface-container-low text-on-surface text-[12px] font-label-md hover:bg-surface-container hover:text-secondary transition-colors flex items-center justify-between group"><span>Show flights with unknown status.</span><span class="material-symbols-outlined text-[13px] text-on-surface-variant group-hover:text-secondary">arrow_forward</span></button>
+            </div>
+          </div>
+        </div>
+        <form id="assistant-form" class="p-3 border-t border-outline-variant/20 bg-surface-container-lowest">
+          <div class="relative flex items-center">
+            <input id="assistant-input" class="w-full h-9 pl-3 pr-8 bg-surface-container-low text-on-surface font-body-sm text-[12px] rounded-lg placeholder:text-on-surface-variant/60 focus:bg-surface-container-lowest focus:ring-1 focus:ring-secondary outline-none transition-all" placeholder="Ask about flights, delays, or cab assignments..." type="text" aria-label="Message the assistant" maxlength="500">
+            <button class="absolute right-2 p-1 text-on-surface-variant hover:text-secondary transition-colors flex items-center justify-center" title="Send message" type="submit"><span class="material-symbols-outlined text-[16px]">send</span></button>
+          </div>
+        </form>
+      </div>
+      <button id="flight-assistant-trigger" class="h-10 px-3.5 rounded-full bg-primary text-on-primary hover:bg-inverse-surface shadow-md flex items-center gap-2 font-label-md text-label-md transition-all" title="Open Operations Assistant" type="button" aria-expanded="false" aria-controls="flight-assistant-card">
+        <span class="material-symbols-outlined text-[18px] text-tertiary-fixed">auto_awesome</span><span class="tracking-tight font-medium">Flight Assistant</span>
+      </button>
+    </div>
+  </main>
+</div>
+
+<!-- ===== APPLICATION LOGIC ===== -->
+<script>
+(function () {
+  'use strict';
+  var TZ = 'Asia/Kolkata', REFRESH_MS = 5 * 60 * 1000;
+  var CLOCK = /^.*?(\d{1,2}:\d{2})\s*$/;
+  var IMPACT = { DELAYED: 1, CANCELLED: 1, DIVERTED: 1, UNKNOWN: 1 };
+
+  // ===== UTILITIES =====
+  var $ = function (id) { return document.getElementById(id); };
+  var $$ = function (sel) { return document.querySelectorAll(sel); };
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; });
+  };
+  var timeFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+  var dateFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, day: 'numeric', month: 'short', year: 'numeric' });
+  var hm = function (ms) { return typeof ms === 'number' && isFinite(ms) ? timeFmt.format(ms) : '--:--'; };
+  var mins = function (a, b) { return Math.round((a - b) / 60000); };
+  var dur = function (m) { return m >= 60 ? Math.floor(m / 60) + 'h ' + (m % 60) + 'm' : m + 'm'; };
+  var signed = function (m) { return (m > 0 ? '+' : '') + m + 'm'; };
+  var term = function (t) { return t ? (/^t/i.test(t) ? t.toUpperCase() : 'T' + t) : ''; };
+  var carrier = function (f) { var m = /^([A-Z0-9]{2})/.exec(f.flight || ''); return m ? m[1] : '—'; };
+  var FS = window.FlightSort; // shared time/sort rules (tools/flight-sort.js)
+  var delayOf = function (f) { return FS.delayMin(f); };
+
+  // ===== STATE =====
+  var state = {
+    data: null, page: 'overview', loadedAt: 0,
+    overview: { dir: 'ALL', query: '' },
+    flights: { filter: 'ALL', query: '', sort: 'soonest', view: 'cards', expanded: {}, lastView: null, selected: null, mapHidden: false, mapRefit: false },
+    notif: { level: 'ALL', query: '' }
+  };
+  try {
+    var fp = JSON.parse(localStorage.getItem('ft-flights-prefs') || '{}');
+    if (FS.SORTS.indexOf(fp.sort) >= 0) state.flights.sort = fp.sort;
+    if (fp.view === 'cards' || fp.view === 'table') state.flights.view = fp.view; // an old 'map' view falls back to cards
+    if (fp.mapHidden === true) state.flights.mapHidden = true;
+  } catch (e) {}
+
+  // ===== THEME =====
+  function applyTheme(dark) {
+    if (dark) document.documentElement.setAttribute('data-theme', 'dark'); else document.documentElement.removeAttribute('data-theme');
+    $('theme-icon').textContent = dark ? 'light_mode' : 'dark_mode';
+  }
+  applyTheme(document.documentElement.getAttribute('data-theme') === 'dark');
+  $('theme-toggle-btn').addEventListener('click', function () {
+    var dark = document.documentElement.getAttribute('data-theme') !== 'dark';
+    applyTheme(dark);
+    try { localStorage.setItem('ft-theme', dark ? 'dark' : 'light'); } catch (e) {}
+  });
+
+  // ===== ROUTER =====
+  var PAGE_META = {
+    'overview':      { title: 'Flight Operations',   subtitle: 'Monitor arrivals, departures, and airport transfers' },
+    'flights':       { title: 'All Flights',          subtitle: 'Track and filter all monitored flights' },
+    'cab-suggestions': { title: 'Cab Suggestions',    subtitle: 'Which arriving people could reasonably share a cab?' },
+    'notifications': { title: 'Notifications',        subtitle: 'System alerts, warnings, and activity log' },
+    'api-usage':     { title: 'API Usage',            subtitle: 'Flight data provider quotas and request history' },
+    'settings':      { title: 'Settings',             subtitle: 'System configuration and preferences' }
+  };
+  function navigate(page) {
+    if (page === 'cab-groups') { page = 'cab-suggestions'; try { history.replaceState(null, '', '#cab-suggestions'); } catch (e) {} } // old links
+    if (!PAGE_META[page]) page = 'overview';
+    state.page = page;
+    Object.keys(PAGE_META).forEach(function (p) {
+      var el = $('page-' + p);
+      if (el) el.classList.toggle('hidden', p !== page);
+    });
+    $$('[data-page]').forEach(function (a) {
+      var on = a.getAttribute('data-page') === page;
+      // Only style sidebar nav links (inside <nav>)
+      if (a.closest('nav')) {
+        a.className = 'flex items-center gap-space-sm px-space-sm py-2 rounded-lg font-label-md text-label-md transition-colors ' +
+          (on ? 'bg-primary text-on-primary shadow-sm' : 'text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface');
+        if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+      }
+    });
+    var m = PAGE_META[page];
+    $('page-title').textContent = m.title;
+    $('page-subtitle').textContent = m.subtitle;
+    if (state.data) renderPage(page);
+  }
+  window.addEventListener('hashchange', function () { navigate(location.hash.slice(1) || 'overview'); });
+
+  // ===== DATA =====
+  function load() {
+    if (!(window.google && google.script && google.script.run)) {
+      return showBanner('This page needs the mock bridge. Make sure mock-bridge.js is loaded.');
+    }
+    $('synced-ago').textContent = 'Syncing…';
+    google.script.run.withSuccessHandler(function (d) {
+      state.data = d; state.loadedAt = Date.now();
+      renderGlobal();
+      renderPage(state.page);
+      tickAgo();
+    }).withFailureHandler(function (e) {
+      showBanner('Could not load dashboard data: ' + (e && e.message || e));
+      $('synced-ago').textContent = 'Sync failed';
+    }).getDashboardData();
+  }
+  function showBanner(text) { var b = $('banner'); b.textContent = text; b.classList.toggle('hidden', !text); }
+  function renderPage(page) {
+    switch (page) {
+      case 'overview':      renderOverview(); break;
+      case 'flights':       renderFlightsPage(); break;
+      case 'cab-suggestions': renderCabSuggestionsPage(); break;
+      case 'notifications': renderNotificationsPage(); break;
+      case 'api-usage':     renderApiUsagePage(); break;
+      case 'settings':      renderSettingsPage(); break;
+    }
+  }
+  function renderGlobal() {
+    var d = state.data, now = d.generatedAt;
+    showBanner(d.errors && d.errors.length ? 'Some data could not be read. ' + d.errors.join(' · ') : '');
+    $$('[data-f="home"]').forEach(function (el) { el.textContent = d.homeAirport || 'BLR'; });
+    $('today').textContent = 'Today, ' + dateFmt.format(now);
+    $('attribution').textContent = d.attribution;
+    renderEngine(d);
+    renderAssistantState(d);
+  }
+
+  // ===== SHARED RENDERERS =====
+  function statusPill(f) {
+    var s = f.status || 'SCHEDULED';
+    var cls = s === 'DELAYED' || s === 'CANCELLED' || s === 'DIVERTED' ? ['bg-error-container text-on-error-container', 'bg-error' + (s === 'DELAYED' ? ' animate-pulse' : '')]
+      : s === 'DEPARTED' ? ['bg-secondary-fixed text-on-secondary-fixed-variant', 'bg-secondary']
+      : s === 'LANDED' ? ['bg-tertiary-fixed text-on-tertiary-fixed-variant', 'bg-on-tertiary-container']
+      : s === 'UNKNOWN' ? ['bg-surface-container text-on-surface-variant', 'bg-outline']
+      : ['bg-surface-container text-on-surface-variant', ''];
+    return '<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded ' + cls[0] + ' font-label-sm text-label-sm font-semibold">' +
+      (cls[1] ? '<span class="w-1.5 h-1.5 rounded-full ' + cls[1] + '"></span>' : '') + esc(s) + '</span>';
+  }
+  function estimateCell(f) {
+    if (FS.validEtaMs(f) == null) return '<span class="text-on-surface-variant" title="No usable estimate">--:--</span>';
+    var dl = delayOf(f);
+    if (f.final && f.status === 'LANDED') return '<span class="text-on-surface">' + hm(f.etaAt) + '</span> <span class="text-[10px] text-on-tertiary-container font-semibold">(Landed)</span>';
+    if (dl != null && dl >= 5) return '<span class="text-error font-semibold">' + hm(f.etaAt) + '</span><span class="text-[10px] text-error font-medium ml-0.5">(' + signed(dl) + ')</span>';
+    if (dl != null && dl <= -5) return '<span class="text-on-tertiary-container font-medium">' + hm(f.etaAt) + ' <span class="text-[10px] font-semibold">(' + dl + 'm early)</span></span>';
+    return '<span class="text-on-surface">' + hm(f.etaAt) + '</span> <span class="text-[10px] text-on-tertiary-container font-semibold ml-0.5">(On Time)</span>';
+  }
+  function routeCell(f, home) {
+    var far = f.dir === 'ARR' ? f.origin : f.destination;
+    var other = far ? '<span class="font-semibold text-on-surface">' + esc(far) + '</span>' : '<span class="font-semibold text-on-surface-variant/60">—</span>';
+    var here = '<span class="font-semibold text-on-surface">' + esc(f.airport || home) + '</span>';
+    var arrow = '<span class="material-symbols-outlined text-[13px] text-on-surface-variant">arrow_forward</span>';
+    return '<div class="flex items-center gap-1 font-data-mono text-[12px]">' + (f.dir === 'ARR' ? other + arrow + here : here + arrow + other) +
+      (f.terminal ? '<span class="ml-1 text-[10px] px-1.5 rounded bg-surface-container text-on-surface-variant font-semibold">' + esc(term(f.terminal)) + '</span>' : '') + '</div>';
+  }
+  // ===== CAB SUGGESTIONS (shared model) =====
+  // Built from the tracker's own planGroups() rules (src/Grouping.js via /grouping-bundle.js) once per data load.
+  // In memory only: nothing is stored, assigned, booked or sent.
+  var SUGGEST_NOTE = 'Suggestion only — arrange transport manually.';
+  function cabModel() {
+    var d = state.data;
+    if (!d) return null;
+    if (state.cabs && state.cabsFor === d) return state.cabs;
+    var G = window.FTGrouping;
+    if (!G || !window.CabSuggestions) {
+      state.cabs = { error: 'Cab suggestions are unavailable: the grouping rules did not load.', shared: [], individual: [], excluded: [], byFlight: {}, config: {} };
+    } else {
+      var C = G.defaultConfig();
+      if (d.maxSeats) C.MAX_SEATS = d.maxSeats;
+      state.cabs = CabSuggestions.build(d.flights, { planGroups: G.planGroups, config: C, nowMs: d.generatedAt, home: d.homeAirport || 'BLR', fs: FS });
+    }
+    state.cabsFor = d;
+    return state.cabs;
+  }
+  function cabInfo(id) { var m = cabModel(); return (m && m.byFlight[id]) || null; }
+  function cabExcluded(id) { var m = cabModel(), x = m ? m.excluded.filter(function (e) { return e.f.id === id; })[0] : null; return x ? x.reason : ''; }
+  function cabShort(info) { return info.kind === 'shared' ? 'Suggested cab ' + info.number : 'Individual pickup'; }
+  function cabCell(f) {
+    var info = cabInfo(f.id);
+    if (!info) {
+      if (f.dir !== 'ARR' || f.active === false || FS.isCompleted(f)) return '<span class="text-[11px] font-medium text-on-surface-variant">—</span>';
+      return '<span class="text-[11px] text-on-surface-variant" title="' + esc(cabExcluded(f.id)) + '">No suggestion yet</span>';
+    }
+    return '<div class="flex flex-col"><div class="flex items-center gap-1 text-[11px] font-medium text-on-surface"><span class="material-symbols-outlined text-[14px] text-secondary">' + (info.kind === 'shared' ? 'local_taxi' : 'person') + '</span>' +
+      '<span>' + esc(cabShort(info)) + (info.kind === 'shared' ? ' (' + info.size + ')' : '') + '</span></div>' +
+      '<span class="text-[10px] text-on-surface-variant font-data-mono">Pickup ~' + hmd(info.pickupMs, state.data.generatedAt) + '</span></div>';
+  }
+  function cabTag(f) {
+    var i = cabInfo(f.id);
+    return i ? '<span class="font-data-mono text-[11px] ' + (i.kind === 'shared' ? 'text-secondary font-semibold' : 'text-on-surface-variant') + '">' + (i.kind === 'shared' ? 'Cab ' + i.number : 'Individual') + '</span>'
+      : '<span class="text-[11px] text-on-surface-variant">—</span>';
+  }
+  function groupIndex() { var m = {}; if (state.data) state.data.groups.forEach(function (g) { m[g.id] = g; }); return m; }
+
+  // ===== OVERVIEW PAGE =====
+  function renderOverview() {
+    var d = state.data, now = d.generatedAt;
+    renderMetrics(d, now);
+    renderOverviewTable();
+    renderAttention(d);
+    renderActivity(d);
+    renderBudget(d);
+  }
+  function renderEngine(d) {
+    var n = d.tickTriggers, on = n >= 1;
+    $('engine-dot').className = 'w-2 h-2 rounded-full ' + (n === 1 ? 'bg-on-tertiary-container animate-pulse' : n > 1 ? 'bg-error' : 'bg-outline');
+    $('engine-label').textContent = n == null ? 'Engine status unknown' : n === 1 ? 'Engine Active' : n > 1 ? n + ' triggers (duplicate)' : 'Engine stopped';
+    $('sync-label').textContent = d.preview ? 'Mock data (local preview)' : on ? 'Live Syncing (OpenSky / ADB)' : 'Tracking stopped';
+    $('sync-dot').className = 'w-1.5 h-1.5 rounded-full ' + (on ? 'bg-on-tertiary-container' : 'bg-outline');
+    $('trigger-note').textContent = n == null ? '' : on ? 'Trigger installed' : 'Start tracking from the sheet menu';
+  }
+  function renderMetrics(d, now) {
+    var act = d.flights.filter(function (f) { return f.active; });
+    var arr = act.filter(function (f) { return f.dir === 'ARR'; }), dep = act.filter(function (f) { return f.dir === 'DEP'; });
+    var impacted = act.filter(function (f) { return IMPACT[f.status]; });
+    $('m-tracked').textContent = act.length;
+    $('m-split').textContent = arr.length + ' Arrivals · ' + dep.length + ' Departures';
+    $('m-onsched').textContent = (act.length - impacted.length) + ' on-schedule';
+    var inbound = arr.filter(function (f) { return !f.final; });
+    $('m-inbound').textContent = inbound.length;
+    var terms = {};
+    inbound.forEach(function (f) { if (f.terminal) terms[term(f.terminal)] = 1; });
+    $('m-terminals').textContent = Object.keys(terms).sort().join(' & ') || 'Inbound';
+    var next = inbound.map(function (f) { return { f: f, t: FS.arrivalTimeMs(f) }; })
+      .filter(function (x) { return x.t && x.t >= now; }).sort(function (a, b) { return a.t - b.t; })[0];
+    $('m-next').innerHTML = next ? 'Next: <strong class="text-on-surface font-semibold">' + esc(next.f.flight) + '</strong> in ' + dur(mins(next.t, now)) : 'No upcoming arrivals';
+    $('m-next-term').classList.toggle('hidden', !(next && next.f.terminal));
+    if (next && next.f.terminal) $('m-next-term').textContent = term(next.f.terminal);
+    $('m-alerts').textContent = impacted.length;
+    $('m-alerts').className = 'font-headline-lg text-headline-lg font-semibold tracking-tight ' + (impacted.length ? 'text-error' : 'text-on-surface');
+    $('m-impacted-chip').classList.toggle('hidden', !impacted.length);
+    $('m-impacted-chip-n').textContent = impacted.length;
+    $('m-delays').textContent = impacted.slice(0, 3).map(function (f) {
+      var dl = delayOf(f);
+      return (f.status === 'DELAYED' && dl ? signed(dl) : f.status.toLowerCase()) + ' ' + f.flight;
+    }).join(' · ') || 'No delays';
+    var cm = cabModel();
+    $('m-groups').textContent = cm.shared.length;
+    $('m-guests').textContent = cm.shared.reduce(function (n, x) { return n + x.members.length; }, 0) + ' could share · ' + cm.individual.length + ' individual';
+  }
+  function visibleOverviewFlights() {
+    var q = state.overview.query.toLowerCase(), groups = groupIndex();
+    return state.data.flights.filter(function (f) {
+      if (state.overview.dir !== 'ALL' && f.dir !== state.overview.dir) return false;
+      if (!q) return true;
+      var g = groups[f.groupId] || {};
+      return [f.flight, f.name, f.status].join(' ').toLowerCase().indexOf(q) >= 0;
+    }).sort(function (a, b) {
+      return (a.active === b.active ? 0 : a.active ? -1 : 1) || (a.final === b.final ? 0 : a.final ? 1 : -1) ||
+        (FS.sortFlights([a, b], 'soonest', 'inbound')[0] === a ? -1 : 1);
+    });
+  }
+  function renderOverviewTable() {
+    var d = state.data, groups = groupIndex(), list = visibleOverviewFlights();
+    var counts = { ALL: d.flights.length, ARR: 0, DEP: 0 };
+    d.flights.forEach(function (f) { counts[f.dir]++; });
+    Object.keys(counts).forEach(function (k) { var el = document.querySelector('[data-count="' + k + '"]'); if (el) el.textContent = counts[k]; });
+    $('all-count').textContent = d.flights.length;
+    $$('[data-dir]').forEach(function (b) {
+      var on = b.getAttribute('data-dir') === state.overview.dir;
+      b.setAttribute('aria-selected', on);
+      b.className = 'px-3 py-1 rounded font-label-sm text-label-sm whitespace-nowrap transition-all ' +
+        (on ? 'bg-surface-container-lowest text-on-surface shadow-sm font-semibold' : 'text-on-surface-variant hover:text-on-surface');
+    });
+    if (!list.length) {
+      $('rows').innerHTML = '<tr><td colspan="8" class="py-6 px-4 text-center text-on-surface-variant">' +
+        (d.flights.length ? 'No flights match this view.' : 'No flights yet.') + '</td></tr>';
+      return;
+    }
+    $('rows').innerHTML = list.map(function (f, i) {
+      var dim = !f.active || (f.final && f.status !== 'LANDED') ? ' opacity-75' : '';
+      return '<tr class="hover:bg-surface-container-low/40 transition-colors group ' + (i % 2 ? 'bg-surface-container-low/20' : 'bg-surface-container-lowest') + '">' +
+        '<td class="py-3.5 px-4 whitespace-nowrap' + dim + '"><div class="flex items-center gap-2.5"><div class="w-7 h-7 rounded bg-surface-container-high flex items-center justify-center text-primary font-data-mono text-[11px] font-bold">' + esc(carrier(f)) + '</div>' +
+          '<div class="flex flex-col"><span class="font-data-mono text-[13px] font-bold ' + (f.invalid ? 'text-error' : 'text-on-surface group-hover:text-secondary') + ' transition-colors">' + esc(f.flight) + '</span>' +
+          '<span class="text-[10px] text-on-surface-variant/60 font-mono">' + (f.dir === 'ARR' ? 'Arrival' : 'Departure') + '</span></div></div></td>' +
+        '<td class="py-3.5 px-3 min-w-[160px]' + dim + '"><div class="flex flex-col"><span class="font-medium text-on-surface font-label-md text-label-md">' + esc(f.name || f.id) + '</span>' +
+          '<span class="text-[11px] text-on-surface-variant/60 truncate">—</span></div></td>' +
+        '<td class="py-3.5 px-3 whitespace-nowrap' + dim + '">' + routeCell(f, d.homeAirport) + '</td>' +
+        '<td class="py-3.5 px-3 whitespace-nowrap font-data-mono text-[12px] text-on-surface-variant' + dim + '">' + hm(f.schedAt) + '</td>' +
+        '<td class="py-3.5 px-3 whitespace-nowrap font-data-mono text-[12px]' + dim + '">' + estimateCell(f) + '</td>' +
+        '<td class="py-3.5 px-3 whitespace-nowrap' + dim + '">' + statusPill(f) + '</td>' +
+        '<td class="py-3.5 px-3 whitespace-nowrap' + dim + '">' + cabCell(f, groups, d.maxSeats) + '</td>' +
+        '<td class="py-3.5 pr-4 pl-2 text-right whitespace-nowrap">' + (!f.active
+          ? '<span class="font-data-mono text-[11px] text-on-surface-variant">Inactive</span>'
+          : '<button disabled class="p-1 rounded text-on-surface-variant ft-off" title="Row actions not available in preview" type="button"><span class="material-symbols-outlined text-[18px]">more_vert</span></button>') + '</td></tr>';
+    }).join('');
+  }
+  function renderAttention(d) {
+    var items = d.flights.filter(function (f) { return f.active && (IMPACT[f.status] || (f.lastError && !f.final)); });
+    $('attn-count').textContent = items.length + (items.length === 1 ? ' Trigger' : ' Triggers');
+    $('attn-count').className = 'font-data-mono text-[11px] px-1.5 py-0.5 rounded font-semibold ' + (items.length ? 'bg-error-container text-on-error-container' : 'bg-surface-container text-on-surface-variant');
+    if (!items.length) { $('attention').innerHTML = '<p class="font-body-sm text-body-sm text-on-surface-variant px-1">Nothing needs attention.</p>'; return; }
+    $('attention').innerHTML = items.slice(0, 6).map(function (f) {
+      var dl = delayOf(f), s = f.status;
+      var title = f.flight + ' ' + (s === 'DELAYED' && dl ? 'Delayed (' + signed(dl) + ')' : IMPACT[s] ? 'Status ' + s : 'Needs a check');
+      var text = s === 'DELAYED'
+        ? (f.dir === 'ARR' ? 'New ETA ' : 'New departure ') + hm(f.etaAt) + ' IST.' + (cabInfo(f.id) ? ' Suggested pickup ~' + hm(cabInfo(f.id).pickupMs) + ' IST.' : '')
+        : (f.lastError || 'Status ' + s + '. See the Log sheet.');
+      return '<div class="p-3 rounded-lg bg-surface-container-low/70 flex flex-col gap-1.5">' +
+        '<div class="flex items-center justify-between gap-2"><span class="font-label-sm text-label-sm font-semibold text-on-surface flex items-center gap-1"><span class="w-2 h-2 rounded-full ' + (s === 'UNKNOWN' || !IMPACT[s] ? 'bg-outline' : 'bg-error') + '"></span>' + esc(title) + '</span>' +
+        '<span class="font-data-mono text-[11px] text-on-surface-variant whitespace-nowrap">' + esc(f.lastCheckDisp.replace(CLOCK, '$1')) + '</span></div>' +
+        '<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">' + esc(f.name ? f.name + ': ' : '') + esc(text) + '</p></div>';
+    }).join('');
+  }
+  function renderActivity(d) {
+    if (!d.log.length) { $('activity').innerHTML = '<p class="font-body-sm text-[12px] text-on-surface-variant">No log entries yet.</p>'; return; }
+    $('activity').innerHTML = d.log.slice(-8).reverse().map(function (e) {
+      var dot = /err/i.test(e.level) ? 'bg-error' : /warn/i.test(e.level) ? 'bg-secondary' : 'bg-on-tertiary-container';
+      return '<div class="relative"><span class="absolute -left-[17px] top-1.5 w-2 h-2 rounded-full ' + dot + ' ring-2 ring-surface-container-lowest"></span>' +
+        '<div class="flex items-baseline justify-between gap-2"><span class="font-data-mono text-[11px] font-semibold text-on-surface">' + (e.at ? hm(e.at) + ' IST' : '') + '</span>' +
+        '<span class="text-[10px] text-on-surface-variant font-mono">' + esc([e.level, e.flight].filter(Boolean).join(' · ')) + '</span></div>' +
+        '<p class="font-body-sm text-[12px] text-on-surface-variant mt-0.5 leading-snug line-clamp-2" title="' + esc(e.message) + '">' + esc(e.message) + '</p></div>';
+    }).join('');
+  }
+  function renderBudget(d) {
+    var u = d.usage;
+    if (!u) {
+      $('budget-health').textContent = 'Unavailable'; $('budget-health').className = 'font-data-mono text-[11px] text-error font-semibold';
+      $('budget-units').textContent = '—'; $('budget-bar').style.width = '0%';
+      $('budget-note').textContent = d.usageError || 'Usage could not be read.';
+      return;
+    }
+    var pct = u.unitLimit ? Math.min(100, (u.units / u.unitLimit) * 100) : 0;
+    var health = u.suspended ? 'Suspended' : pct >= 85 ? 'Watch' : 'Healthy';
+    $('budget-health').textContent = health;
+    $('budget-health').className = 'font-data-mono text-[11px] font-semibold ' + (health === 'Healthy' ? 'text-on-tertiary-container' : 'text-error');
+    $('budget-units').textContent = u.units + ' / ' + u.unitLimit + ' units (' + pct.toFixed(1) + '%)';
+    $('budget-bar').style.width = pct + '%';
+    $('budget-bar').className = 'h-full rounded-full ' + (health === 'Healthy' ? 'bg-secondary' : 'bg-error');
+    $('budget-note').textContent = u.suspended ? 'Lookups suspended: ' + u.suspended
+      : u.window + ' · ' + u.requests + ' / ' + u.requestLimit + ' requests · ' + Math.max(0, u.unitLimit - u.units) + ' units left';
+  }
+
+  // ===== FLIGHTS PAGE =====
+  // Data rules (sections, filters, sort, valid times) live in tools/flight-sort.js; this part only renders.
+  var FILTER_META = [
+    ['ALL', 'All Flights', ''], ['ARR', 'Arrivals', ''], ['DEP', 'Departures', ''],
+    ['AIRBORNE', 'Airborne', 'bg-secondary'], ['DELAYED', 'Delayed', 'bg-error'], ['LANDED', 'Landed', 'bg-on-tertiary-container'],
+    ['CANCELLED', 'Cancelled', 'bg-error'], ['UNKNOWN', 'Unknown', 'bg-outline']
+  ];
+  var FILTER_CHIP = { AIRBORNE: 'bg-secondary-fixed text-on-secondary-fixed', DELAYED: 'bg-error-container text-on-error-container',
+    LANDED: 'bg-tertiary-fixed text-on-tertiary-fixed-variant', CANCELLED: 'bg-error-container text-on-error-container' };
+  var TONE = {
+    air:     { text: 'text-secondary', bg: 'bg-secondary', stroke: 'stroke-secondary', fill: 'fill-secondary', chip: 'bg-secondary-fixed text-on-secondary-fixed', strip: 'bg-secondary' },
+    late:    { text: 'text-error', bg: 'bg-error', stroke: 'stroke-error', fill: 'fill-error', chip: 'bg-error-container text-on-error-container', strip: 'bg-error' },
+    landed:  { text: 'text-on-tertiary-container', bg: 'bg-on-tertiary-container', stroke: 'stroke-tertiary-fixed-dim', fill: 'fill-on-tertiary-container', chip: 'bg-tertiary-fixed text-on-tertiary-fixed-variant', strip: 'bg-on-tertiary-container' },
+    idle:    { text: 'text-primary', bg: 'bg-outline', stroke: 'stroke-outline', fill: 'fill-primary', chip: 'bg-surface-container-high text-on-surface', strip: '' },
+    unknown: { text: 'text-on-surface-variant', bg: 'bg-outline', stroke: 'stroke-outline', fill: 'fill-outline', chip: 'bg-surface-container text-on-surface-variant', strip: 'bg-outline' }
+  };
+  var PLANE = 'M14 2 C14.5 2 15 3.5 15 5 L15 11 L25 17 L25 19 L15 16 L15 22 L18 24 L18 26 L14 25 L10 26 L10 24 L13 22 L13 16 L3 19 L3 17 L13 11 L13 5 C13 3.5 13.5 2 14 2 Z';
+  var SORT_TEXT = { soonest: 'soonest first', latest: 'latest first', flight: 'by flight number' };
+
+  function hmd(ms, now) {
+    var v = FS.toMs(ms);
+    if (v == null) return '--:--';
+    var dd = FS.istDayOffset(v, now);
+    return hm(v) + (dd ? '<sup class="ml-0.5 text-[9px] font-semibold">' + (dd > 0 ? '+' : '') + dd + '</sup>' : '');
+  }
+  function km(n) { return typeof n === 'number' && isFinite(n) ? Math.round(n).toLocaleString('en-IN') + ' km' : ''; }
+  function tone(f) {
+    var s = f.status || 'SCHEDULED';
+    if (f.active === false || s === 'UNKNOWN') return 'unknown';
+    if (s === 'CANCELLED' || s === 'DIVERTED' || FS.isDelayed(f)) return 'late';
+    if (s === 'LANDED') return 'landed';
+    if (FS.isAirborne(f)) return 'air';
+    return 'idle';
+  }
+  function statusLabel(f) {
+    var s = f.status || 'SCHEDULED';
+    var base = s === 'DEPARTED' ? (f.dir === 'ARR' ? 'Airborne' : 'Departed') : s.charAt(0) + s.slice(1).toLowerCase();
+    if (s === 'DELAYED' && FS.isAirborne(f)) base = 'Delayed · airborne';
+    return f.active === false ? 'Inactive · ' + base : base;
+  }
+  function flightPill(f) {
+    var tn = tone(f), c = TONE[tn];
+    return '<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded ' + c.chip + ' font-label-sm text-label-sm uppercase font-bold tracking-wider whitespace-nowrap">' +
+      '<span class="w-1.5 h-1.5 rounded-full ' + c.bg + (tn === 'air' ? ' animate-pulse' : '') + '"></span>' + esc(statusLabel(f)) + '</span>';
+  }
+  function ends(f, home) {
+    var arr = f.dir === 'ARR';
+    return {
+      o: f.origin || (arr ? '' : f.airport || home), on: f.originName || '',
+      d: f.destination || (arr ? f.airport || home : ''), dn: f.destName || ''
+    };
+  }
+
+  /** Reusable journey graphic: a curved route with the aircraft placed by FlightSort.progress. */
+  function journeyArc(f, now, size) {
+    var big = size === 'full';
+    var P0 = big ? [40, 70] : [12, 38], P1 = big ? [370, 0] : [120, -2], P2 = big ? [700, 70] : [228, 38];
+    var W = big ? 740 : 240, H = big ? 90 : 46;
+    var s = f.status || 'SCHEDULED', tn = tone(f), c = TONE[tn];
+    var p = FS.progress(f, now), air = FS.isAirborne(f);
+    var pos = p != null ? p : air ? 0.5 : 0;
+    var at = function (t) { var u = 1 - t; return [u * u * P0[0] + 2 * u * t * P1[0] + t * t * P2[0], u * u * P0[1] + 2 * u * t * P1[1] + t * t * P2[1]]; };
+    var r1 = function (n) { return Math.round(n * 10) / 10; };
+    var B = at(pos);
+    var dx = 2 * (1 - pos) * (P1[0] - P0[0]) + 2 * pos * (P2[0] - P1[0]), dy = 2 * (1 - pos) * (P1[1] - P0[1]) + 2 * pos * (P2[1] - P1[1]);
+    var ang = air ? Math.atan2(dy, dx) * 180 / Math.PI + 90 : 90;
+    var route = 'M ' + P0.join(' ') + ' Q ' + P1.join(' ') + ' ' + P2.join(' ');
+    var trail = pos > 0 ? 'M ' + P0.join(' ') + ' Q ' + r1(P0[0] + pos * (P1[0] - P0[0])) + ' ' + r1(P0[1] + pos * (P1[1] - P0[1])) + ' ' + r1(B[0]) + ' ' + r1(B[1]) : '';
+    var ended = s === 'CANCELLED' || s === 'DIVERTED';
+    var sw = big ? 3 : 2.25, sc = big ? 0.95 : 0.62;
+    var planeOpacity = ended ? 0.35 : f.active === false || s === 'UNKNOWN' ? 0.45 : air || s === 'LANDED' ? 1 : 0.75;
+    var label = f.flight + ': ' + statusLabel(f) + (p != null && air ? ', ' + Math.round(p * 100) + '% of journey' : '');
+    return '<svg class="w-full h-auto overflow-visible" viewBox="0 0 ' + W + ' ' + H + '" fill="none" role="img" aria-label="' + esc(label) + '">' +
+      '<path d="' + route + '" class="' + (ended ? 'stroke-error' : 'stroke-surface-container-high') + '" stroke-dasharray="4 4" stroke-linecap="round" stroke-width="' + sw + '"' + (ended ? ' opacity="0.45"' : '') + '></path>' +
+      (trail && !ended ? '<path d="' + trail + '" class="' + c.stroke + '" stroke-linecap="round" stroke-width="' + (sw + 0.5) + '"></path>' : '') +
+      '<circle cx="' + P0[0] + '" cy="' + P0[1] + '" r="' + (big ? 5 : 3.5) + '" class="fill-primary"></circle>' +
+      '<circle cx="' + P2[0] + '" cy="' + P2[1] + '" r="' + (big ? 5 : 3.5) + '" class="' + (s === 'LANDED' ? 'fill-on-tertiary-container' : 'fill-on-surface') + '"></circle>' +
+      '<g transform="translate(' + r1(B[0]) + ' ' + r1(B[1] - (air ? 0 : big ? 2 : 1)) + ')" opacity="' + planeOpacity + '">' +
+        (air ? '<circle r="' + (big ? 16 : 10) + '" class="ft-ping ' + c.stroke + '" stroke-width="1" fill="none"' + (p == null ? ' stroke-dasharray="2 2"' : '') + '></circle>' : '') +
+        (air || s === 'LANDED' ? '<circle r="' + (big ? 9 : 6) + '" class="' + c.fill + '" opacity="0.15"></circle>' : '') +
+        '<g transform="rotate(' + r1(ang) + ') scale(' + sc + ') translate(-14 -14)"><path d="' + PLANE + '" class="' + (tn === 'idle' ? 'fill-primary' : c.fill) + '"></path></g>' +
+      '</g></svg>';
+  }
+
+  /** One-line journey note under the route (collapsed) and above the bar (expanded). */
+  function journeyNote(f, now) {
+    var s = f.status || 'SCHEDULED', p = FS.progress(f, now), t = FS.bestTime(f).ms;
+    if (f.active === false) return { left: 'Tracking off for this row', right: '' };
+    if (s === 'CANCELLED') return { left: 'Cancelled', right: '' };
+    if (s === 'DIVERTED') return { left: 'Diverted', right: '' };
+    if (s === 'UNKNOWN') return { left: 'Status could not be verified', right: '' };
+    if (s === 'LANDED') return { left: 'Landed ' + hmd(t, now), right: '' };
+    if (f.dir === 'DEP' && s === 'DEPARTED') return { left: 'Departed ' + hmd(f.depActualAt || t, now), right: 'Not tracked after departure' };
+    if (FS.isAirborne(f)) {
+      if (p == null) return { left: 'Airborne', right: 'Progress unavailable' };
+      var rem = t != null ? Math.max(0, mins(t, now)) : null;
+      var est = FP.positionState(f, now).state !== 'fresh' ? ' (est. from times)' : '';
+      return { left: Math.round(p * 100) + '% complete' + est, right: rem != null ? dur(rem) + ' to ' + (f.dir === 'ARR' ? 'touchdown' : 'arrival') : '' };
+    }
+    var depAt = f.dir === 'DEP' ? t : FS.toMs(f.depSchedAt);
+    return { left: depAt != null ? 'Departs ' + hmd(depAt, now) : 'Not departed', right: '' };
+  }
+
+  function cabSummary(f, g, now) {
+    var info = cabInfo(f.id);
+    if (!info) {
+      if (f.dir !== 'ARR' || f.active === false || FS.isCompleted(f)) return '';
+      return '<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">schedule</span>No pickup suggestion yet</span>';
+    }
+    return '<span class="flex items-center gap-1 min-w-0"><span class="material-symbols-outlined text-[14px] text-secondary">' + (info.kind === 'shared' ? 'local_taxi' : 'person') + '</span>' +
+      '<span class="truncate">' + esc(cabShort(info)) + ' · pickup ~' + hmd(info.pickupMs, now) +
+      (info.kind === 'shared' ? ' · with ' + info.with.length + (info.with.length === 1 ? ' other' : ' others') : '') + '</span></span>';
+  }
+
+  function timesBlock(f, now) {
+    var sched = FS.toMs(f.schedAt), est = FS.validEtaMs(f), dl = FS.delayMin(f), lbl = f.dir === 'ARR' ? 'Arr' : 'Dep';
+    var late = dl != null && dl >= 5, early = dl != null && dl <= -5;
+    return '<div class="flex flex-col items-start md:items-end font-data-mono text-[11px] leading-tight gap-0.5">' +
+      '<span class="text-on-surface-variant">Sched ' + lbl + ' <span class="' + (late && est != null ? 'line-through' : '') + '">' + hmd(sched, now) + '</span></span>' +
+      (est != null
+        ? '<span class="font-bold text-[12px] ' + (late ? 'text-error' : early ? 'text-on-tertiary-container' : 'text-on-surface') + '">' + (f.status === 'LANDED' ? 'Landed ' : 'Est ') + hmd(est, now) +
+          (dl ? ' <span class="font-semibold">(' + (dl > 0 ? '+' : '') + dl + 'm)</span>' : '') + '</span>'
+        : '<span class="text-on-surface-variant" title="No usable estimate; ordered by scheduled time' + (sched == null ? ' (none known, listed last)' : '') + '">Est —</span>') +
+      '</div>';
+  }
+
+  function cardHtml(f, ctx) {
+    var now = ctx.now, g = ctx.groups[f.groupId], tn = tone(f), c = TONE[tn], e = ends(f, ctx.home);
+    var open = !!state.flights.expanded[f.id], note = journeyNote(f, now), p = FS.progress(f, now), air = FS.isAirborne(f);
+    var dim = f.active === false || f.status === 'CANCELLED' ? ' opacity-80' : '';
+    var badge = tn === 'late' ? 'bg-error-container text-on-error-container' : tn === 'landed' ? 'bg-tertiary-fixed text-on-tertiary-fixed-variant' : 'bg-primary text-on-primary';
+    var cab = cabSummary(f, g, now);
+    return '<article class="ft-card bg-surface-container-lowest rounded-xl shadow-sm hover:shadow-md transition-shadow relative overflow-hidden' + dim + (state.flights.selected === f.id ? ' ft-selected' : '') + '" data-card="' + esc(f.id) + '" data-open="' + open + '">' +
+      (c.strip ? '<div class="absolute top-0 left-0 bottom-0 w-1 ' + c.strip + '"></div>' : '') +
+      '<button type="button" data-toggle="' + esc(f.id) + '" aria-expanded="' + open + '" aria-controls="fd-' + esc(f.id) + '" class="w-full text-left pl-space-md pr-space-sm py-space-sm grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_minmax(0,10.5rem)_auto] gap-x-4 gap-y-2 items-center focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary rounded-xl">' +
+        // A: identity, guest, cab
+        '<div class="flex items-center gap-space-sm min-w-0 order-1">' +
+          '<div class="w-10 h-10 shrink-0 rounded-lg ' + badge + ' flex flex-col items-center justify-center shadow-sm">' +
+            '<span class="tracking-tighter text-[13px] leading-none font-bold">' + esc(carrier(f)) + '</span>' +
+            '<span class="material-symbols-outlined text-[12px] mt-0.5 opacity-80">' + (f.dir === 'ARR' ? 'flight_land' : 'flight_takeoff') + '</span></div>' +
+          '<div class="flex flex-col min-w-0 gap-0.5">' +
+            '<div class="flex items-center gap-1.5 min-w-0"><span class="font-headline-sm text-headline-sm text-primary tracking-tight font-bold' + (f.invalid ? ' text-error' : '') + '">' + esc(f.flight || '—') + '</span>' +
+              '<span class="font-label-sm text-[10px] uppercase px-1.5 rounded ' + (f.dir === 'ARR' ? 'bg-tertiary-fixed text-on-tertiary-fixed-variant' : 'bg-secondary-fixed text-on-secondary-fixed') + '">' + (f.dir === 'ARR' ? 'Arrival' : 'Departure') + '</span></div>' +
+            '<span class="font-body-sm text-body-sm text-on-surface font-semibold truncate">' + esc(f.name || f.id) + '</span>' +
+            (cab ? '<span class="font-data-mono text-[11px] text-on-surface-variant min-w-0">' + cab + '</span>' : '') +
+          '</div></div>' +
+        // D: chevron
+        '<span class="order-2 md:order-4 self-start md:self-center p-1 rounded-full text-on-surface-variant"><span class="ft-chev material-symbols-outlined text-[20px] block">expand_more</span></span>' +
+        // B: route infographic
+        '<div class="order-3 md:order-2 col-span-2 md:col-span-1 min-w-0 w-full max-w-[24rem] mx-auto flex flex-col gap-0.5">' +
+          '<div class="flex items-end justify-center gap-2">' +
+            '<div class="flex flex-col items-start shrink-0"><span class="font-headline-sm text-headline-sm font-bold text-primary leading-none">' + esc(e.o || '—') + '</span></div>' +
+            '<div class="flex-1 min-w-0 px-1">' + journeyArc(f, now, 'mini') + '</div>' +
+            '<div class="flex flex-col items-end shrink-0"><span class="font-headline-sm text-headline-sm font-bold text-primary leading-none">' + esc(e.d || '—') + '</span></div>' +
+          '</div>' +
+          (air && p != null ? '<div class="w-full bg-surface-container rounded-full h-1 overflow-hidden"><div class="' + c.bg + ' h-full rounded-full" style="width:' + (p * 100).toFixed(1) + '%"></div></div>' : '') +
+          '<div class="flex items-center justify-between gap-2 font-data-mono text-[10.5px] text-on-surface-variant"><span class="truncate">' + note.left + '</span><span class="truncate ' + (air ? c.text + ' font-semibold' : '') + '">' + note.right + '</span></div>' +
+        '</div>' +
+        // C: status and times
+        '<div class="order-4 md:order-3 col-span-2 md:col-span-1 flex md:flex-col items-center md:items-end justify-between gap-1.5">' + flightPill(f) + timesBlock(f, now) + '</div>' +
+      '</button>' +
+      '<div class="ft-expand" id="fd-' + esc(f.id) + '"' + (open ? '' : ' inert') + '><div>' + detailsHtml(f, ctx) + '</div></div>' +
+    '</article>';
+  }
+
+  function nodeHtml(code, name, lines, right) {
+    return '<div class="flex flex-col min-w-0 ' + (right ? 'items-end text-right' : '') + '">' +
+      '<div class="flex items-baseline gap-1.5 min-w-0 max-w-full ' + (right ? 'flex-row-reverse' : '') + '"><span class="font-headline-md text-[1.25rem] leading-7 font-bold text-primary tracking-tight">' + esc(code || '—') + '</span>' +
+      (name ? '<span class="font-label-sm text-label-sm text-on-surface-variant uppercase font-semibold truncate">' + esc(name) + '</span>' : '') + '</div>' +
+      lines.filter(Boolean).map(function (l) { return '<span class="font-data-mono text-[11px] text-on-surface-variant">' + l + '</span>'; }).join('') + '</div>';
+  }
+  function tg(t, g) { return [t ? 'Terminal ' + esc(String(t).replace(/^T/i, '')) : '', g ? 'Gate ' + esc(g) : ''].filter(Boolean).join(' • '); }
+
+  function detailsHtml(f, ctx) {
+    var now = ctx.now, d = state.data, g = ctx.groups[f.groupId], e = ends(f, ctx.home), tn = tone(f), c = TONE[tn];
+    var arr = f.dir === 'ARR', sched = FS.toMs(f.schedAt), est = FS.validEtaMs(f), dl = FS.delayMin(f);
+    var depS = arr ? FS.toMs(f.depSchedAt) : sched, depA = FS.toMs(f.depActualAt), depE = arr ? null : est;
+    var origin = nodeHtml(e.o, e.on, [
+      depS != null ? 'Dep ' + hmd(depS, now) + (depA != null ? ' <span class="text-on-surface font-semibold">(Actual ' + hmd(depA, now) + ')</span>' : depE != null && depE !== depS ? ' <span class="text-error font-semibold">(Est ' + hmd(depE, now) + ')</span>' : '') : '',
+      arr ? tg(f.depTerminal, f.depGate) : tg(f.terminal, f.gate)
+    ]);
+    var arrS = arr ? sched : null, arrE = arr ? est : FS.toMs(f.destEtaAt);
+    var late = dl != null && dl >= 5 && arr;
+    var dest = nodeHtml(e.d, e.dn, [
+      arr ? (arrS != null ? '<span class="' + (late && arrE != null ? 'line-through' : '') + '">Sched ' + hmd(arrS, now) + '</span>' : 'Sched —') +
+        (arrE != null ? ' <span class="font-bold text-[12px] ' + (late ? 'text-error' : 'text-secondary') + '">' + (f.status === 'LANDED' ? 'Landed ' : 'Est ') + hmd(arrE, now) + '</span>' : ' <span>Est —</span>')
+        : (arrE != null ? 'Sched arr ' + hmd(arrE, now) + ' IST' : ''),
+      arr ? tg(f.terminal, f.gate) : ''
+    ], true);
+    var p = FS.progress(f, now), air = FS.isAirborne(f), note = journeyNote(f, now), dist = f.distanceKm;
+    var progressLeft = air && p != null ? Math.round(p * 100) + '% completed' + (dist ? ' (' + km(p * dist).replace(' km', '') + ' / ' + km(dist) + ')' : '') +
+        (FP.positionState(f, now).state !== 'fresh' ? ' · estimated from times, not a reported position' : '')
+      : f.status === 'LANDED' ? 'Journey complete' + (dist ? ' (' + km(dist) + ')' : '') : note.left;
+    var elapsed = depA != null && air ? dur(Math.max(0, mins(now, depA))) + ' elapsed' : '';
+    var remaining = air && arrE != null ? dur(Math.max(0, mins(arrE, now))) + ' remaining' : '';
+    var flown = f.status === 'LANDED' && depA != null && est != null ? dur(mins(est, depA)) + ' in flight' : '';
+    var progressRight = [elapsed, remaining].filter(Boolean).join(' • ') || flown || note.right;
+    var events = d.log.filter(function (x) { return x.flight && f.flight && x.flight === f.flight; }).slice(-6).reverse();
+    var mockChip = d.preview ? '<span class="px-1.5 rounded bg-secondary-fixed text-on-secondary-fixed font-label-sm text-[9px] uppercase font-bold" title="Synthetic preview data">Mock</span>' : '';
+    return '<div class="pl-space-md pr-space-sm pb-space-md flex flex-col gap-space-sm">' +
+      // journey infographic
+      '<div class="rounded-xl bg-surface-container-low/50 p-3 flex flex-col gap-1">' +
+        '<div class="grid grid-cols-2 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-2 items-start">' + origin +
+          '<div class="hidden lg:flex flex-col items-center text-center gap-1 pt-1"><span class="font-label-sm text-label-sm uppercase font-bold px-2 py-0.5 rounded shadow-sm ' + c.chip + '">' + esc(statusLabel(f)) + (dl && dl >= 5 && !FS.isCompleted(f) ? ' +' + dl + 'm' : '') + '</span>' +
+            (dist ? '<span class="font-data-mono text-[11px] text-on-surface-variant">Great circle ' + km(dist) + '</span>' : '') +
+            (f.aircraft ? '<span class="font-data-mono text-[11px] text-on-surface-variant">' + esc(f.aircraft) + '</span>' : '') + '</div>' + dest + '</div>' +
+        '<div class="w-full my-1">' + journeyArc(f, now, 'full') + '</div>' +
+        ((air && p != null) || f.status === 'LANDED' ? '<div class="w-full bg-surface-container rounded-full h-2 overflow-hidden"><div class="' + c.bg + ' h-full rounded-full" style="width:' + ((p || 0) * 100).toFixed(1) + '%"></div></div>' : '') +
+        '<div class="flex flex-wrap items-center justify-between gap-x-3 font-data-mono text-[11px] text-on-surface-variant"><span>' + progressLeft + '</span><span class="font-semibold ' + (air ? c.text : '') + '">' + progressRight + '</span></div>' +
+      '</div>' +
+      // telemetry | events | cab
+      '<div class="grid grid-cols-1 md:grid-cols-3 gap-space-sm">' + telemetryHtml(f, now, mockChip) + eventsHtml(events, f, now) + cabHtml(f, g, ctx, mockChip) + '</div>' +
+      // actions
+      '<div class="flex flex-wrap items-center justify-end gap-space-xs">' +
+        (FP.positionState(f, now).state !== 'unavailable' ? '<button type="button" data-show-map="' + esc(f.id) + '" class="px-3 py-1.5 rounded-lg bg-surface-container-low text-on-surface hover:bg-surface-container transition-colors font-label-md text-label-md flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">map</span>Show on map</button>' : '') +
+        (cabInfo(f.id) ? '<button type="button" data-goto-suggestion="' + esc(cabInfo(f.id).key) + '" class="px-3 py-1.5 rounded-lg bg-primary text-on-primary hover:opacity-90 transition-opacity font-label-md text-label-md flex items-center gap-1 shadow-sm"><span class="material-symbols-outlined text-[16px]">local_taxi</span>View cab suggestion</button>' : '') +
+        '<button type="button" disabled class="px-3 py-1.5 rounded-lg bg-surface-container-low text-on-surface font-label-md text-label-md flex items-center gap-1 ft-off" title="Opens the Flights sheet row in production; not available in the local preview"><span class="material-symbols-outlined text-[16px]">open_in_new</span>Flight details</button>' +
+        '<button type="button" data-toggle="' + esc(f.id) + '" class="px-3 py-1.5 rounded-lg bg-surface-container-low text-on-surface hover:bg-surface-container transition-colors font-label-md text-label-md flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">expand_less</span>Collapse</button>' +
+      '</div></div>';
+  }
+
+  function panel(icon, title, chip, body) {
+    return '<div class="bg-surface-container-low/60 rounded-lg p-2.5 flex flex-col gap-1.5 min-w-0">' +
+      '<div class="flex items-center justify-between gap-1"><div class="flex items-center gap-1.5 min-w-0"><span class="material-symbols-outlined text-[16px] text-secondary">' + icon + '</span>' +
+      '<span class="font-label-sm text-label-sm uppercase font-bold text-on-surface tracking-wider truncate">' + title + '</span></div>' + (chip || '') + '</div>' + body + '</div>';
+  }
+  function kv(k, v) {
+    return '<div class="flex items-center justify-between gap-2 font-data-mono text-[11px]"><span class="text-on-surface-variant">' + k + '</span><span class="text-on-surface font-semibold text-right">' + v + '</span></div>';
+  }
+  function spark(values) {
+    var max = Math.max.apply(null, values.concat([1])), n = values.length;
+    if (n < 2) return '';
+    var pts = values.map(function (v, i) { return (i * 160 / (n - 1)).toFixed(1) + ' ' + (30 - (v / max) * 24).toFixed(1); });
+    return '<svg class="w-full h-8" viewBox="0 0 160 32" preserveAspectRatio="none" fill="none" aria-hidden="true"><path d="M ' + pts.join(' L ') + '" class="stroke-secondary" stroke-width="1.8" vector-effect="non-scaling-stroke"></path>' +
+      '<path d="M ' + pts.join(' L ') + ' L 160 32 L 0 32 Z" class="fill-secondary" opacity="0.1"></path></svg>';
+  }
+  function telemetryHtml(f, now, chip) {
+    var t = f.telemetry;
+    if (!t) return panel('insights', 'Telemetry', '', '<p class="font-body-sm text-[12px] text-on-surface-variant">No live position for this flight. Values appear once OpenSky reports one.</p>');
+    var rows = [];
+    if (t.onGround) rows.push(kv('State', 'On ground'));
+    if (typeof t.altFt === 'number') rows.push(kv('Altitude', t.altFt.toLocaleString('en-IN') + ' ft'));
+    if (typeof t.gsKts === 'number') rows.push(kv('Ground speed', t.gsKts + ' kts'));
+    if (typeof t.vsFpm === 'number') rows.push(kv('Vertical rate', (t.vsFpm > 0 ? '+' : '') + t.vsFpm + ' ft/min'));
+    if (typeof t.headingDeg === 'number') rows.push(kv('Heading', t.headingDeg + '°'));
+    if (t.squawk) rows.push(kv('Squawk', esc(t.squawk)));
+    if (typeof t.lat === 'number' && typeof t.lon === 'number') rows.push(kv('Position', Math.abs(t.lat).toFixed(3) + '°' + (t.lat >= 0 ? 'N' : 'S') + ', ' + Math.abs(t.lon).toFixed(3) + '°' + (t.lon >= 0 ? 'E' : 'W')));
+    if (FS.toMs(t.fixAt) != null) rows.push(kv('Last fix', dur(Math.max(0, mins(now, t.fixAt))) + ' ago'));
+    return panel('insights', 'Telemetry', '<span class="flex items-center gap-1">' + posChip(FP.positionState(f, now)) + chip + '</span>', (t.altHistory ? spark(t.altHistory) : '') + rows.join(''));
+  }
+  function eventsHtml(events, f, now) {
+    var body = events.length ? '<div class="flex flex-col gap-1.5">' + events.map(function (x) {
+      var col = /err/i.test(x.level) ? 'text-error' : /warn/i.test(x.level) ? 'text-secondary' : 'text-on-surface-variant';
+      return '<div class="flex items-start gap-1.5 font-data-mono text-[11px]"><span class="' + col + ' font-bold shrink-0">' + hmd(x.at, now) + '</span><span class="text-on-surface leading-tight">' + esc(x.message) + '</span></div>';
+    }).join('') + '</div>' : '<p class="font-body-sm text-[12px] text-on-surface-variant">No events logged for this flight.</p>';
+    var ext = [f.etaSource ? 'ETA source: ' + esc(f.etaSource) : '', f.lastCheckDisp ? 'Last check ' + esc(f.lastCheckDisp.replace(CLOCK, '$1')) : ''].filter(Boolean).join(' · ');
+    return panel('history', 'Events & status', '', body + (f.lastError ? '<p class="font-body-sm text-[12px] text-error">' + esc(f.lastError) + '</p>' : '') +
+      (ext ? '<p class="font-data-mono text-[10px] text-on-surface-variant/80">' + ext + '</p>' : ''));
+  }
+  function cabHtml(f, g, ctx, chip) {
+    var info = cabInfo(f.id);
+    if (!info) {
+      var msg = f.dir === 'DEP' ? 'Departures are not part of cab suggestions.' : (cabExcluded(f.id) || 'No pickup suggestion for this flight.');
+      return panel('local_taxi', 'Cab suggestion', '', '<p class="font-body-sm text-[12px] text-on-surface-variant">' + esc(msg) + '</p>');
+    }
+    return panel('local_taxi', esc(cabShort(info)), '',
+      kv('Suggested pickup', '~' + hmd(info.pickupMs, ctx.now) + ' IST') +
+      kv('Meeting area', esc(info.terminal ? 'Terminal ' + info.terminal.replace(/^T/, '') + ' arrivals' : 'Arrivals (terminal not confirmed)')) +
+      (info.with.length ? '<div class="font-data-mono text-[11px] text-on-surface-variant">Could share with ' + info.with.map(function (m) { return esc(m.name) + ' (' + esc(m.flight) + ')'; }).join(', ') + '</div>' : '') +
+      '<p class="font-body-sm text-[12px] text-on-surface-variant">' + esc(info.reason) + '</p>' +
+      '<p class="font-label-sm text-[10px] uppercase tracking-wider text-on-surface-variant/80">' + SUGGEST_NOTE + '</p>');
+  }
+
+  function renderFilterTabs(view) {
+    $('fl-filters').innerHTML = FILTER_META.map(function (m) {
+      var on = m[0] === view.filter, n = view.counts[m[0]];
+      return '<button type="button" role="tab" aria-selected="' + on + '" data-fl-filter="' + m[0] + '" class="px-3 py-1.5 rounded-lg font-label-sm text-label-sm font-semibold whitespace-nowrap flex items-center gap-1 transition-colors ' +
+        (on ? 'bg-primary text-on-primary shadow-sm' : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low') + '">' +
+        (m[2] ? '<span class="w-1.5 h-1.5 rounded-full ' + m[2] + '"></span>' : '') + '<span>' + m[1] + '</span>' +
+        '<span class="px-1.5 rounded-full font-data-mono text-[10px] ' + (on ? 'bg-on-primary/20' : FILTER_CHIP[m[0]] || 'bg-surface-container') + '">' + n + '</span></button>';
+    }).join('');
+  }
+
+  function flightsCtx() {
+    var d = state.data;
+    return { now: d.generatedAt, home: d.homeAirport || 'BLR', groups: groupIndex(), maxSeats: d.maxSeats, airports: d.airports || {} };
+  }
+
+  function renderFlightsPage() {
+    var d = state.data, st = state.flights, ctx = flightsCtx();
+    var view = FS.buildView(d.flights, { filter: st.filter, query: st.query, sort: st.sort });
+    st.lastView = view;
+    renderFilterTabs(view);
+    $('fl-sort').value = view.sort;
+    $('fl-attribution').textContent = d.attribution;
+    $('fl-mock-chip').classList.toggle('hidden', !d.preview); $('fl-mock-chip').classList.toggle('flex', !!d.preview);
+    var canSim = !!(d.preview && window.__FT_PREVIEW__ && window.__FT_PREVIEW__.shiftEta);
+    $('fl-sim-eta').classList.toggle('hidden', !canSim); $('fl-sim-eta').classList.toggle('flex', canSim);
+    $$('[data-fl-view]').forEach(function (b) {
+      var on = b.getAttribute('data-fl-view') === st.view;
+      b.setAttribute('aria-pressed', on);
+      b.className = 'p-1.5 rounded-md transition-colors ' + (on ? 'bg-surface-container-lowest text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface');
+    });
+    var filterName = FILTER_META.filter(function (m) { return m[0] === view.filter; })[0][1];
+    $('fl-summary').textContent = 'Showing ' + view.shown + ' of ' + view.total + ' flights' +
+      (view.filter !== 'ALL' ? ' · ' + filterName : '') + (st.query ? ' · “' + st.query + '”' : '') + ' · ' + SORT_TEXT[view.sort];
+    $('fl-cards').classList.toggle('hidden', st.view !== 'cards');
+    $('fl-table').classList.toggle('hidden', st.view !== 'table');
+    $('fl-expand-ctl').classList.toggle('hidden', st.view !== 'cards');
+    if (st.view === 'cards') renderFlightCards(view, ctx); else renderFlightTable(view, ctx);
+    renderSharedMap(view, ctx);
+    if (state.pendingFlight) {
+      var pid = state.pendingFlight; state.pendingFlight = null;
+      var pc = document.querySelector('#fl-cards [data-card="' + CSS.escape(pid) + '"]');
+      if (!pc && (st.filter !== 'ALL' || st.query)) { st.filter = 'ALL'; st.query = ''; $('fl-search').value = ''; st.mapRefit = true; state.pendingFlight = pid; renderFlightsPage(); return; }
+      if (pc) setTimeout(function () { highlightFlight(pid, true); }, 0);
+    }
+    renderOpsSidebar(ctx);
+  }
+
+  function emptyState() {
+    return '<div class="bg-surface-container-lowest rounded-xl shadow-sm p-space-lg text-center flex flex-col items-center gap-2">' +
+      '<span class="material-symbols-outlined text-[28px] text-on-surface-variant">travel_explore</span>' +
+      '<span class="font-label-md text-label-md text-on-surface">' + (state.data.flights.length ? 'No flights match the current filter and search.' : 'No flights yet.') + '</span>' +
+      (state.data.flights.length ? '<button type="button" data-fl-clear class="px-3 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container font-label-sm text-label-sm">Clear filter and search</button>' : '') + '</div>';
+  }
+
+  function renderFlightCards(view, ctx) {
+    if (!view.shown) { $('fl-cards').innerHTML = emptyState(); return; }
+    $('fl-cards').innerHTML = view.sections.map(function (s) {
+      var how = s.key === 'completed' && view.sort !== 'flight' ? 'most recent first' : s.key === 'outbound' && view.sort !== 'flight' ? SORT_TEXT[view.sort].replace('first', 'departure first') : SORT_TEXT[view.sort];
+      var title = s.key === 'inbound' ? 'Inbound to ' + esc(ctx.home) : s.key === 'outbound' ? 'Departures from ' + esc(ctx.home) : s.title;
+      return '<section class="flex flex-col gap-space-xs" data-section="' + s.key + '" aria-label="' + title + '">' +
+        '<div class="flex items-center justify-between px-1 pt-1"><h2 class="font-label-sm text-label-sm uppercase tracking-wider font-bold text-on-surface-variant">' + title +
+        ' <span class="font-data-mono">(' + s.flights.length + ')</span></h2><span class="font-data-mono text-[11px] text-on-surface-variant/80">' + how + '</span></div>' +
+        s.flights.map(function (f) { return cardHtml(f, ctx); }).join('') + '</section>';
+    }).join('');
+  }
+
+  function renderFlightTable(view, ctx) {
+    var d = state.data;
+    if (!view.shown) { $('fl-rows').innerHTML = '<tr><td colspan="12" class="p-0">' + emptyState() + '</td></tr>'; return; }
+    $('fl-rows').innerHTML = view.ordered.map(function (f, i) {
+      var dim = f.active === false ? ' opacity-60' : '';
+      var dl = FS.delayMin(f), g = ctx.groups[f.groupId];
+      var delayText = dl == null ? '—' : dl === 0 ? '<span class="text-on-tertiary-container">0m</span>' : dl > 0 ? '<span class="text-error font-semibold">' + signed(dl) + '</span>' : '<span class="text-on-tertiary-container">' + dl + 'm</span>';
+      return '<tr data-row="' + esc(f.id) + '" class="hover:bg-surface-container-low/40 transition-colors ' + (state.flights.selected === f.id ? 'ft-selected ' : '') + (i % 2 ? 'bg-surface-container-low/20' : 'bg-surface-container-lowest') + '">' +
+        '<td class="py-3 px-4 whitespace-nowrap' + dim + '"><div class="flex items-center gap-2"><div class="w-6 h-6 rounded bg-surface-container-high flex items-center justify-center text-primary font-data-mono text-[10px] font-bold">' + esc(carrier(f)) + '</div>' +
+          '<span class="font-data-mono text-[13px] font-bold ' + (f.invalid ? 'text-error' : 'text-on-surface') + '">' + esc(f.flight) + '</span></div></td>' +
+        '<td class="py-3 px-3' + dim + '"><span class="font-label-md text-label-md text-on-surface">' + esc(f.name || f.id) + '</span></td>' +
+        '<td class="py-3 px-3 whitespace-nowrap' + dim + '"><span class="inline-flex items-center px-2 py-0.5 rounded font-label-sm text-label-sm font-semibold ' +
+          (f.dir === 'ARR' ? 'bg-tertiary-fixed text-on-tertiary-fixed-variant' : 'bg-secondary-fixed text-on-secondary-fixed-variant') + '">' + esc(f.dir) + '</span></td>' +
+        '<td class="py-3 px-3 whitespace-nowrap' + dim + '">' + routeCell(f, d.homeAirport) + '</td>' +
+        '<td class="py-3 px-3 whitespace-nowrap font-data-mono text-[12px]' + dim + '">' + esc(term(f.terminal)) + (f.gate ? ' / ' + esc(f.gate) : '') + '</td>' +
+        '<td class="py-3 px-3 whitespace-nowrap font-data-mono text-[12px] text-on-surface-variant' + dim + '">' + hmd(f.schedAt, ctx.now) + '</td>' +
+        '<td class="py-3 px-3 whitespace-nowrap font-data-mono text-[12px]' + dim + '">' + estimateCell(f) + '</td>' +
+        '<td class="py-3 px-3 whitespace-nowrap font-data-mono text-[12px]' + dim + '">' + delayText + '</td>' +
+        '<td class="py-3 px-3 whitespace-nowrap' + dim + '">' + flightPill(f) + '</td>' +
+        '<td class="py-3 px-3 whitespace-nowrap font-data-mono text-[11px] text-on-surface-variant' + dim + '">' + esc(f.etaSource || '—') + '</td>' +
+        '<td class="py-3 px-3 whitespace-nowrap' + dim + '">' + cabTag(f) + '</td>' +
+        '<td class="py-3 px-3 whitespace-nowrap font-data-mono text-[11px] text-on-surface-variant' + dim + '">' + esc(f.lastCheckDisp ? f.lastCheckDisp.replace(CLOCK, '$1') : '—') + '</td></tr>';
+    }).join('');
+  }
+
+  // Sidebar: built from the same flights, groups and FlightSort rules as the cards.
+  function renderOpsSidebar(ctx) {
+    var d = state.data, now = ctx.now;
+    var cm = cabModel();
+    var soon = cm.shared.concat(cm.individual).filter(function (x) { return x.pickupMs >= now - 30 * 60000; })
+      .sort(function (a, b) { return a.pickupMs - b.pickupMs; });
+    $('ops-fleet-chip').textContent = 'Suggestions only';
+    $('ops-curbside').innerHTML = (cm.error ? '<p class="font-body-sm text-[12px] text-error">' + esc(cm.error) + '</p>' : '') + ['T1', 'T2'].map(function (T) {
+      var list = soon.filter(function (x) { return x.terminal === T; });
+      return '<div class="p-space-sm rounded-lg bg-surface-container-low/60 flex flex-col gap-1.5" data-terminal="' + T + '">' +
+        '<div class="flex items-center justify-between gap-2"><span class="font-label-md text-label-md font-bold text-on-surface">Terminal ' + T.slice(1) + '</span>' +
+        '<span class="font-data-mono text-[11px] text-on-surface-variant">' + list.length + (list.length === 1 ? ' pickup' : ' pickups') + '</span></div>' +
+        (list.length ? list.slice(0, 4).map(function (x) {
+          return '<button type="button" data-goto-suggestion="' + esc(x.key) + '" class="text-left bg-surface-container-lowest p-1.5 rounded flex items-center justify-between gap-2 font-data-mono text-[10.5px] hover:ring-1 hover:ring-secondary/40 transition">' +
+            '<span class="min-w-0 truncate"><span class="text-on-surface font-semibold">' + (x.kind === 'shared' ? 'Cab ' + x.number : 'Individual') + '</span> ' +
+            '<span class="text-on-surface-variant">' + esc(x.members.map(function (m) { return m.f.flight; }).join(', ')) + '</span></span>' +
+            '<span class="shrink-0 text-on-surface">~' + hmd(x.pickupMs, now) + '</span></button>';
+        }).join('') : '<span class="font-body-sm text-[12px] text-on-surface-variant">No pickups suggested soon.</span>') + '</div>';
+    }).join('') + '<p class="font-label-sm text-[10px] uppercase tracking-wider text-on-surface-variant/80 pt-1">' + SUGGEST_NOTE + '</p>';
+
+    var up = FS.upcomingInbounds(d.flights, now, 4 * 60 * 60000, 6);
+    $('ops-inbound').innerHTML = up.length ? up.map(function (f) {
+      var ci = cabInfo(f.id), dl = FS.delayMin(f), late = FS.isDelayed(f), bt = FS.bestTime(f), e = ends(f, ctx.home);
+      return '<button type="button" data-jump="' + esc(f.id) + '" class="w-full text-left p-2.5 rounded-lg flex items-center justify-between gap-2 hover:ring-1 hover:ring-secondary/40 transition ' + (late ? 'bg-error-container/30' : 'bg-surface-container-low') + '">' +
+        '<div class="flex items-center gap-2 min-w-0"><span class="font-data-mono font-bold text-[12px] ' + (late ? 'text-error' : 'text-primary') + '" title="' + (bt.basis === 'estimated' ? 'Estimated' : 'Scheduled (no valid estimate)') + '">' + hmd(bt.ms, now) + (bt.basis === 'scheduled' ? '<span class="text-[9px] font-semibold text-on-surface-variant ml-0.5">S</span>' : '') + '</span>' +
+          '<div class="flex flex-col min-w-0"><div class="flex items-center gap-1"><span class="font-label-md text-label-md font-bold text-on-surface">' + esc(f.flight) + '</span>' +
+          '<span class="font-label-sm text-[10px] ' + (late && dl > 0 ? 'text-error font-semibold">+' + dl + 'm late' : 'text-on-surface-variant">' + (e.o ? 'from ' + esc(e.o) : '')) + '</span></div>' +
+          '<span class="font-body-sm text-[11px] text-on-surface-variant truncate">' + esc(f.name) + '</span></div></div>' +
+        '<div class="text-right shrink-0">' + (f.terminal ? '<span class="px-2 py-0.5 rounded font-data-mono text-[10px] font-bold ' + (late ? 'bg-error-container text-on-error-container' : 'bg-secondary-fixed text-on-secondary-fixed') + '">' + esc(term(f.terminal)) + '</span>' : '') +
+          '<span class="block font-data-mono text-[10px] mt-0.5 ' + (ci ? 'text-secondary' : 'text-on-surface-variant') + '">' + (ci ? (ci.kind === 'shared' ? 'Cab ' + ci.number : 'Individual') : 'No suggestion') + '</span></div></button>';
+    }).join('') : '<p class="font-body-sm text-[12px] text-on-surface-variant">No arrivals expected in the next 4 hours.</p>';
+
+    var acts = d.log.slice(-6).reverse();
+    $('ops-activity').innerHTML = acts.length ? acts.map(function (x) {
+      var err = /err/i.test(x.level), warn = /warn/i.test(x.level);
+      return '<div class="p-2 rounded flex items-start gap-1.5 ' + (err ? 'bg-error-container/30' : 'bg-surface-container-low') + '">' +
+        '<span class="font-bold shrink-0 ' + (err ? 'text-error' : warn ? 'text-secondary' : 'text-on-surface-variant') + '">' + hmd(x.at, now) + '</span>' +
+        '<span class="text-on-surface leading-tight">' + (x.flight ? '<strong>' + esc(x.flight) + '</strong> ' : '') + esc(x.message) + '</span></div>';
+    }).join('') + (d.preview ? '<p class="text-[10px] text-on-surface-variant/80 pt-1">Synthetic log entries (local preview).</p>' : '')
+      : '<p class="font-body-sm text-[12px] text-on-surface-variant">No log entries yet.</p>';
+  }
+
+  function setCardOpen(id, open) {
+    if (open) state.flights.expanded[id] = true; else delete state.flights.expanded[id];
+    var card = document.querySelector('[data-card="' + CSS.escape(id) + '"]');
+    if (!card) return;
+    card.setAttribute('data-open', open);
+    var btn = card.querySelector('button[aria-controls]');
+    if (btn) btn.setAttribute('aria-expanded', open);
+    var panelEl = card.querySelector('.ft-expand');
+    if (open) panelEl.removeAttribute('inert'); else panelEl.setAttribute('inert', '');
+  }
+  function saveFlightPrefs() {
+    try { localStorage.setItem('ft-flights-prefs', JSON.stringify({ sort: state.flights.sort, view: state.flights.view, mapHidden: state.flights.mapHidden })); } catch (e) {}
+  }
+
+  // ===== FLIGHTS MAP (Leaflet) =====
+  // Plots only coordinates the tracker reported (FlightPosition rules); reads the same data as the cards,
+  // so the map adds no provider requests. Tiles are the only network fetch (OpenStreetMap standard tiles,
+  // keyless; dark theme is a CSS filter on the tile pane so markers keep the dashboard colours).
+  var FP = window.FlightPosition;
+  var TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+  var TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors';
+  var POS_CHIP = { fresh: 'bg-secondary-fixed text-on-secondary-fixed', stale: 'bg-surface-container-high text-on-surface-variant',
+    grounded: 'bg-tertiary-fixed text-on-tertiary-fixed-variant', unavailable: 'bg-surface-container text-on-surface-variant' };
+  var POS_ICON = { fresh: 'my_location', stale: 'history', grounded: 'flight_land', unavailable: 'location_off' };
+  // One map instance for the page, created on first render and kept; renders only swap its layers.
+  var shared = { map: null, layer: null, markers: {}, fitted: false };
+  var CAT_LABEL = { ontime: 'On time', delayed: 'Delayed', outbound: 'Outbound', landed: 'Landed', unknown: 'Unverified' };
+
+  function leafletReady() { return !!(window.L && L.map); }
+  function posChip(pos) {
+    return '<span class="inline-flex items-center gap-1 px-1.5 rounded font-label-sm text-[10px] uppercase font-bold ' + POS_CHIP[pos.state] + '" title="' + esc(pos.reason || pos.label) + '">' +
+      '<span class="material-symbols-outlined text-[12px]">' + POS_ICON[pos.state] + '</span>' + esc(pos.label) + '</span>';
+  }
+  function fixText(pos, now) {
+    if (pos.fixAt == null) return esc(pos.reason);
+    return 'Position at ' + hmd(pos.fixAt, now) + ' IST · ' + (pos.ageMin < 1 ? 'just now' : dur(pos.ageMin) + ' ago');
+  }
+  /** Marker colour category, from the same rules as the cards (FlightSort). */
+  function markerCat(f) {
+    var s = f.status || 'SCHEDULED';
+    if (s === 'LANDED') return 'landed';
+    if (s === 'CANCELLED' || s === 'DIVERTED' || FS.isDelayed(f)) return 'delayed';
+    if (s === 'UNKNOWN' || f.active === false) return 'unknown';
+    return f.dir === 'DEP' ? 'outbound' : 'ontime';
+  }
+  function ensureSharedMap() {
+    if (shared.map || !leafletReady()) return shared.map;
+    var el = $('fl-map');
+    shared.map = L.map(el, { scrollWheelZoom: false, worldCopyJump: true, minZoom: 2, maxZoom: 12 });
+    L.tileLayer(TILE_URL, { attribution: TILE_ATTR, maxZoom: 12 }).addTo(shared.map);
+    shared.layer = L.layerGroup().addTo(shared.map);
+    shared.map.setView([15, 78], 4, { animate: false });
+    return shared.map;
+  }
+
+  function planeIcon(f, pos, selected) {
+    var size = 26, rot = pos.headingDeg != null ? pos.headingDeg : 0;
+    return L.divIcon({ className: 'ft-mk-wrap', iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+      html: '<div class="ft-mk ft-cat-' + markerCat(f) + ' ft-fr-' + pos.state + (selected ? ' ft-mk-sel' : '') + '" style="width:' + size + 'px;height:' + size + 'px">' +
+        '<svg viewBox="0 0 28 28" aria-hidden="true" style="transform:rotate(' + rot + 'deg)"><path d="' + PLANE + '"></path></svg>' +
+        '<span class="ft-mk-tag">' + esc(f.flight) + '</span></div>' });
+  }
+  function airportMarker(pt, home) {
+    return L.circleMarker([pt.lat, pt.lon], { radius: home ? 6 : 4, weight: 2, className: home ? 'ft-ap ft-ap-home' : 'ft-ap' })
+      .bindTooltip(esc(pt.code), { permanent: true, direction: 'bottom', offset: [0, 4], className: 'ft-ap-label' });
+  }
+  function routeLine(ends, cat) {
+    return ends.origin && ends.dest ? L.polyline(FP.greatCircle(ends.origin, ends.dest, 48), { className: 'ft-route ft-cat-' + (cat || 'ontime'), weight: 2, dashArray: '6 6', interactive: false }) : null;
+  }
+  /** Keeps marker longitudes on the same world copy as the route (no jump across the antimeridian). */
+  function near(lon, ref) { if (ref == null) return lon; while (lon - ref > 180) lon -= 360; while (ref - lon > 180) lon += 360; return lon; }
+  function fit(map, pts, single) {
+    if (pts.length > 1) map.fitBounds(pts, { paddingTopLeft: [28, 28], paddingBottomRight: [28, 48], maxZoom: 7, animate: false });
+    else if (pts.length === 1) map.setView(pts[0], single || 6, { animate: false });
+    else map.setView([15, 78], 4, { animate: false });
+  }
+
+  // --- the shared map: all flights in the current filter/search with a usable reported position
+  function renderSharedMap(view, ctx) {
+    var items = FP.mapItems(view.ordered, ctx.now);
+    var counts = { fresh: 0, stale: 0, grounded: 0 };
+    items.plotted.forEach(function (x) { counts[x.pos.state]++; });
+    $('fl-map-mock').classList.toggle('hidden', !(state.data.preview && items.plotted.length));
+    $('fl-map-counts').textContent = items.plotted.length + ' on map · ' + counts.fresh + ' fresh · ' + counts.stale + ' stale · ' + counts.grounded + ' on ground · ' + items.unplotted.length + ' without position';
+    $('fl-map-unplotted-wrap').classList.toggle('hidden', !items.unplotted.length);
+    $('fl-map-unplotted-sum').textContent = 'Not on the map (' + items.unplotted.length + ')';
+    $('fl-map-unplotted').innerHTML = items.unplotted.map(function (x) {
+      return '<button type="button" data-select="' + esc(x.f.id) + '" class="text-left p-2 rounded-lg bg-surface-container-low hover:bg-surface-container transition-colors flex items-center justify-between gap-2 min-w-0">' +
+        '<span class="min-w-0 flex flex-col"><span class="font-label-md text-label-md font-bold text-on-surface">' + esc(x.f.flight || '—') + ' <span class="font-normal text-on-surface-variant">' + esc(x.f.name) + '</span></span>' +
+        '<span class="font-data-mono text-[10.5px] text-on-surface-variant truncate">' + esc(x.pos.reason) + '</span></span>' + flightPill(x.f) + '</button>';
+    }).join('');
+    $('fl-map-empty').classList.toggle('hidden', !!items.plotted.length);
+    $('fl-map-empty-title').textContent = view.shown ? 'No usable aircraft coordinates in this view' : 'No flights match the current filter';
+    $('fl-map-empty-sub').textContent = view.shown ? view.shown + (view.shown === 1 ? ' flight has' : ' flights have') + ' no fresh or stale reported position.' : 'Clear the filter or search to see aircraft.';
+
+    if (state.flights.mapHidden) return; // built when shown again
+    if (!ensureSharedMap()) { $('fl-map-fallback').classList.remove('hidden'); return; }
+    var map = shared.map, pts = [], seen = {};
+    shared.layer.clearLayers(); shared.markers = {};
+    var addAirport = function (pt) {
+      if (!pt || seen[pt.code]) return;
+      seen[pt.code] = 1; airportMarker(pt, pt.code === ctx.home).addTo(shared.layer); pts.push([pt.lat, pt.lon]);
+    };
+    addAirport(FP.airportPoint(ctx.home, ctx.airports));
+    items.plotted.forEach(function (x) {
+      var f = x.f, pos = x.pos, ends = FP.routeEnds(f, ctx.airports, ctx.home), cat = markerCat(f);
+      if (f.status !== 'LANDED') { var line = routeLine(ends, cat); if (line) line.addTo(shared.layer); addAirport(ends.origin); addAirport(ends.dest); }
+      var lon = near(pos.lon, ends.origin ? ends.origin.lon : null), bt = FS.bestTime(f);
+      var popup = '<div class="flex flex-col gap-1 min-w-[200px]">' +
+        '<div class="flex items-center justify-between gap-2"><strong class="text-[13px]">' + esc(f.flight) + '</strong><span class="flex items-center gap-1">' +
+          '<span class="ft-key ft-cat-' + cat + '"></span><span class="text-[11px] font-semibold">' + CAT_LABEL[cat] + '</span></span></div>' +
+        '<span class="text-[12px]">' + esc(f.name) + '</span>' +
+        '<span class="font-data-mono text-[11px] opacity-80">' + esc((ends.origin || {}).code || f.origin || '—') + ' → ' + esc((ends.dest || {}).code || f.destination || '—') +
+          (bt.ms != null ? ' · ' + (f.dir === 'ARR' ? 'arr ' : 'dep ') + hmd(bt.ms, ctx.now) + (bt.basis === 'scheduled' ? ' (sched)' : '') : '') + '</span>' +
+        '<span class="flex items-center gap-1.5">' + posChip(pos) + '<span class="font-data-mono text-[11px] opacity-80">' + fixText(pos, ctx.now) + '</span></span>' +
+        (pos.altFt != null && !pos.onGround ? '<span class="font-data-mono text-[11px] opacity-80">' + pos.altFt.toLocaleString('en-IN') + ' ft' + (pos.gsKts != null ? ' · ' + pos.gsKts + ' kts' : '') + '</span>' : '') +
+        (state.data.preview ? '<span class="text-[10px] font-semibold uppercase opacity-70">Mock coordinates · not live</span>' : '') +
+        '<div class="flex gap-1 mt-1"><button type="button" data-select="' + esc(f.id) + '" class="flex-1 px-2 py-1 rounded bg-surface-container-low text-[12px] font-semibold">Show card</button>' +
+        '<button type="button" data-jump="' + esc(f.id) + '" class="flex-1 px-2 py-1 rounded bg-primary text-on-primary text-[12px] font-semibold">Expand card</button></div></div>';
+      var m = L.marker([pos.lat, lon], { icon: planeIcon(f, pos, state.flights.selected === f.id), title: f.flight + ' · ' + CAT_LABEL[cat] + ' · ' + pos.label, riseOnHover: true })
+        .bindPopup(popup, { closeButton: true, autoPanPadding: [24, 24] }).addTo(shared.layer);
+      m.on('click', function () { highlightFlight(f.id, false); });
+      shared.markers[f.id] = { marker: m, f: f, pos: pos };
+      pts.push([pos.lat, lon]);
+    });
+    map.invalidateSize({ animate: false });
+    // Fit on first show and when the filter/search changes; ordinary refreshes keep the coordinator's view.
+    if (!shared.fitted || state.flights.mapRefit) { fit(map, pts, 6); shared.fitted = true; }
+    state.flights.mapRefit = false;
+  }
+
+  /** Marks one flight as selected on the map and in the list; optionally scrolls its card/row into view. */
+  function highlightFlight(id, scroll) {
+    state.flights.selected = id;
+    Object.keys(shared.markers).forEach(function (k) {
+      var x = shared.markers[k]; x.marker.setIcon(planeIcon(x.f, x.pos, k === id));
+    });
+    $$('#page-flights .ft-selected').forEach(function (el) { el.classList.remove('ft-selected'); });
+    var el = document.querySelector(state.flights.view === 'table' ? '#fl-rows [data-row="' + CSS.escape(id) + '"]' : '#fl-cards [data-card="' + CSS.escape(id) + '"]');
+    if (!el) return;
+    el.classList.add('ft-selected');
+    if (scroll) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.remove('ft-flash'); void el.offsetWidth; el.classList.add('ft-flash');
+    }
+  }
+
+  /** From a card: bring the map into view and open that aircraft's popup. */
+  function showOnMap(id) {
+    if (state.flights.mapHidden) setMapHidden(false);
+    var x = shared.markers[id];
+    $('fl-map-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (!x) return;
+    highlightFlight(id, false);
+    if (!shared.map.getBounds().pad(-0.1).contains(x.marker.getLatLng())) shared.map.panTo(x.marker.getLatLng(), { animate: false });
+    x.marker.openPopup();
+  }
+
+  function setMapHidden(hidden) {
+    state.flights.mapHidden = hidden;
+    $('fl-map-body').classList.toggle('hidden', hidden);
+    $('fl-map-toggle').setAttribute('aria-expanded', !hidden);
+    $('fl-map-toggle').innerHTML = '<span class="material-symbols-outlined text-[15px]">' + (hidden ? 'expand_more' : 'expand_less') + '</span><span>' + (hidden ? 'Show map' : 'Hide map') + '</span>';
+    saveFlightPrefs();
+    if (!hidden && state.data && state.flights.lastView) renderSharedMap(state.flights.lastView, flightsCtx());
+  }
+
+  // ===== CAB SUGGESTIONS PAGE =====
+  /** Arrival changes that affect transport, most urgent first. Same status rules as the Flights page. */
+  function transportAlerts(d, now, cm) {
+    var out = [];
+    d.flights.forEach(function (f) {
+      if (f.dir !== 'ARR' || f.active === false) return;
+      var st = f.status || 'SCHEDULED', bt = FS.bestTime(f), dl = FS.delayMin(f), info = cm.byFlight[f.id], a = null;
+      var pick = info ? ' Suggested pickup ~' + hmd(info.pickupMs, now) + ' IST.' : '';
+      if (st === 'CANCELLED') a = { rank: 0, tone: 'late', icon: 'cancel', title: 'Cancelled', text: 'No pickup needed. Update any manual arrangement.' };
+      else if (st === 'DIVERTED') a = { rank: 0, tone: 'late', icon: 'alt_route', title: 'Diverted', text: 'Confirm the new plan with the guest before arranging transport.' };
+      else if (FS.isDelayed(f)) a = { rank: 1, tone: 'late', icon: 'schedule', title: 'Delayed' + (dl > 0 ? ' +' + dl + 'm' : ''), text: (bt.ms != null ? 'Now ETA ' + hmd(bt.ms, now) + ' IST.' : '') + pick };
+      else if (st === 'UNKNOWN') a = { rank: 2, tone: 'unknown', icon: 'help', title: 'Unverified', text: 'Status could not be verified. Check before arranging transport.' };
+      else if (st === 'LANDED' && bt.ms != null && bt.ms >= now - 3 * 60 * 60000) a = { rank: 3, tone: 'landed', icon: 'flight_land', title: 'Landed ' + hmd(bt.ms, now), text: pick || 'Arrival confirmed.' };
+      if (a) { a.f = f; a.t = bt.ms; out.push(a); }
+    });
+    return out.sort(function (x, y) { return x.rank - y.rank || (x.t || 0) - (y.t || 0); });
+  }
+
+  function suggestionCard(sg, now) {
+    var shared = sg.kind === 'shared';
+    var meet = sg.terminal ? 'Terminal ' + sg.terminal.replace(/^T/, '') + ' · arrivals' : 'Arrivals · terminal not confirmed';
+    return '<article data-suggestion="' + esc(sg.key) + '" class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md flex flex-col gap-space-sm">' +
+      '<div class="flex items-start justify-between gap-2">' +
+        '<div class="flex items-center gap-2 min-w-0"><span class="w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ' + (shared ? 'bg-secondary-fixed text-on-secondary-fixed' : 'bg-surface-container text-on-surface-variant') + '">' +
+          '<span class="material-symbols-outlined text-[18px]">' + (shared ? 'local_taxi' : 'person') + '</span></span>' +
+          '<div class="flex flex-col min-w-0"><h3 class="font-headline-sm text-headline-sm text-primary tracking-tight">' + esc(sg.label) + '</h3>' +
+          '<span class="font-body-sm text-[12px] text-on-surface-variant">' + esc(meet) + '</span></div></div>' +
+        '<span class="shrink-0 px-2 py-0.5 rounded-full bg-surface-container font-data-mono text-[11px] text-on-surface">' + sg.members.length + (sg.members.length === 1 ? ' passenger' : ' passengers') + '</span></div>' +
+      '<div class="flex items-baseline gap-x-2 gap-y-1 flex-wrap"><span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant">Suggested pickup</span>' +
+        '<span class="text-[1.25rem] leading-7 font-semibold text-on-surface">~' + hmd(sg.pickupMs, now) + '</span><span class="font-data-mono text-[11px] text-on-surface-variant">IST</span>' +
+        (sg.pickupPassed ? '<span class="px-1.5 rounded bg-surface-container text-on-surface-variant font-label-sm text-[10px] uppercase">Time passed</span>' : '') + '</div>' +
+      '<p class="flex items-start gap-1.5 font-body-sm text-[12.5px] text-on-surface-variant"><span class="material-symbols-outlined text-[16px] text-secondary shrink-0">info</span><span>' + esc(sg.reason) + '</span></p>' +
+      '<ul class="flex flex-col divide-y divide-outline-variant/15">' + sg.members.map(function (m) {
+        var f = m.f;
+        return '<li class="py-2 flex items-center justify-between gap-2"><div class="min-w-0 flex flex-col">' +
+          '<span class="font-label-md text-label-md font-semibold text-on-surface truncate">' + esc(f.name || f.id) + '</span>' +
+          '<a href="#flights" data-flight-link="' + esc(f.id) + '" class="font-data-mono text-[11px] text-secondary hover:underline w-fit">' + esc(f.flight) + (f.origin ? ' from ' + esc(f.origin) : '') + '</a></div>' +
+          '<div class="flex flex-col items-end gap-1 shrink-0">' + flightPill(f) +
+          '<span class="font-data-mono text-[11px] text-on-surface-variant">' + (f.status === 'LANDED' ? 'Landed ' : 'ETA ') + hmd(m.t, now) + (m.basis === 'scheduled' ? ' (sched)' : '') + '</span></div></li>';
+      }).join('') + '</ul>' +
+      '<p class="font-label-sm text-[10px] uppercase tracking-wider text-on-surface-variant/80">' + SUGGEST_NOTE + '</p></article>';
+  }
+
+  function renderCabSuggestionsPage() {
+    var d = state.data, now = d.generatedAt, cm = cabModel();
+    $('cs-mock').classList.toggle('hidden', !d.preview); $('cs-mock').classList.toggle('inline-flex', !!d.preview);
+    var alerts = transportAlerts(d, now, cm);
+    var tones = { late: 'text-error', unknown: 'text-outline', landed: 'text-on-tertiary-container' }; // calm rows: colour only on the icon
+    $('cs-alerts').innerHTML = '<div class="flex items-center justify-between mb-1.5"><h2 class="font-label-sm text-label-sm uppercase tracking-wider font-bold text-on-surface-variant">Transport-relevant changes</h2>' +
+      '<span class="font-data-mono text-[11px] text-on-surface-variant">' + alerts.length + '</span></div>' +
+      (alerts.length ? '<div class="flex flex-col gap-1">' + alerts.map(function (a) {
+        // a.title/a.text are built here (times only); guest fields are escaped
+        return '<a href="#flights" data-flight-link="' + esc(a.f.id) + '" class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-surface-container-low text-on-surface hover:bg-surface-container transition-colors">' +
+          '<span class="material-symbols-outlined text-[16px] shrink-0 ' + tones[a.tone] + '">' + a.icon + '</span>' +
+          '<span class="min-w-0 flex-1 font-body-sm text-[12.5px] leading-snug"><strong class="font-semibold">' + esc(a.f.flight || '—') + ' · ' + a.title + '</strong> ' +
+          '<span class="text-on-surface-variant">' + esc(a.f.name || '') + '. ' + a.text + '</span></span>' +
+          '<span class="material-symbols-outlined text-[16px] shrink-0 opacity-70" aria-hidden="true">chevron_right</span></a>';
+      }).join('') + '</div>' : '<p class="font-body-sm text-[12px] text-on-surface-variant">No delays, cancellations, diversions, landings or unverified arrivals right now.</p>');
+    var sharing = cm.shared.reduce(function (n, x) { return n + x.members.length; }, 0);
+    $('cs-summary').textContent = cm.error || (cm.shared.length + (cm.shared.length === 1 ? ' shared suggestion' : ' shared suggestions') + ' for ' + sharing + ' people · ' +
+      cm.individual.length + ' individual ' + (cm.individual.length === 1 ? 'pickup' : 'pickups'));
+    $('cs-shared').innerHTML = cm.shared.length ? cm.shared.map(function (x) { return suggestionCard(x, now); }).join('')
+      : '<p class="md:col-span-2 bg-surface-container-lowest rounded-xl shadow-sm p-space-md font-body-sm text-body-sm text-on-surface-variant">No arrivals are close enough to share a cab right now.</p>';
+    $('cs-individual-wrap').classList.toggle('hidden', !cm.individual.length);
+    $('cs-individual').innerHTML = cm.individual.map(function (x) { return suggestionCard(x, now); }).join('');
+    $('cs-excluded-wrap').classList.toggle('hidden', !cm.excluded.length);
+    $('cs-excluded-sum').textContent = 'Not suggested (' + cm.excluded.length + ')';
+    $('cs-excluded').innerHTML = cm.excluded.map(function (x) {
+      return '<li class="py-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5"><span class="min-w-0"><a href="#flights" data-flight-link="' + esc(x.f.id) + '" class="font-data-mono text-secondary hover:underline">' + esc(x.f.flight || '—') + '</a> ' +
+        '<span class="text-on-surface">' + esc(x.f.name || '') + '</span></span><span class="text-on-surface-variant">' + esc(x.reason) + '</span></li>';
+    }).join('');
+    var c = cm.config || {};
+    $('cs-rules').textContent = c.windowMin ? 'Same rules as the tracker: grouped by terminal, arrivals within ' + c.windowMin + ' min of the first person, up to ' + c.maxSeats +
+      ' per cab, pickup about ' + c.bufferMin + ' min after the last arrival. Recalculated on every refresh; nothing is saved.' : '';
+    if (state.highlightSuggestion) {
+      var el = document.querySelector('[data-suggestion="' + CSS.escape(state.highlightSuggestion) + '"]');
+      state.highlightSuggestion = null;
+      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.remove('ft-flash'); void el.offsetWidth; el.classList.add('ft-flash'); }
+    }
+  }
+
+  // ===== NOTIFICATIONS PAGE =====
+  function renderNotificationsPage() {
+    var d = state.data;
+    var notifs = d.notifications || [];
+    // Metrics
+    var info = notifs.filter(function (n) { return n.level === 'INFO'; }).length;
+    var warn = notifs.filter(function (n) { return n.level === 'WARN'; }).length;
+    var err  = notifs.filter(function (n) { return n.level === 'ERROR'; }).length;
+    $('nf-total').textContent = notifs.length;
+    $('nf-info').textContent = info;
+    $('nf-warn').textContent = warn;
+    $('nf-error').textContent = err;
+    // Style level tabs
+    $$('[data-nf-level]').forEach(function (b) {
+      var on = b.getAttribute('data-nf-level') === state.notif.level;
+      b.className = 'px-3 py-1 rounded font-label-sm text-label-sm whitespace-nowrap transition-all ' +
+        (on ? 'bg-surface-container-lowest text-on-surface shadow-sm font-semibold' : 'text-on-surface-variant hover:text-on-surface');
+    });
+    // Filter
+    var q = state.notif.query.toLowerCase();
+    var filtered = notifs.filter(function (n) {
+      if (state.notif.level !== 'ALL' && n.level !== state.notif.level) return false;
+      if (!q) return true;
+      return [n.flight, n.message, n.channel, n.recipient].join(' ').toLowerCase().indexOf(q) >= 0;
+    });
+    if (!filtered.length) {
+      $('nf-list').innerHTML = '<div class="py-6 px-4 text-center text-on-surface-variant font-body-sm">No notifications match the current filters.</div>';
+      return;
+    }
+    $('nf-list').innerHTML = '<div class="divide-y divide-outline-variant/10">' + filtered.slice().reverse().map(function (n) {
+      var dot = /err/i.test(n.level) ? 'bg-error' : /warn/i.test(n.level) ? 'bg-secondary' : 'bg-on-tertiary-container';
+      var levelBadge = n.level === 'ERROR' ? 'bg-error-container text-on-error-container' : n.level === 'WARN' ? 'bg-secondary-fixed text-on-secondary-fixed-variant' : 'bg-surface-container text-on-surface-variant';
+      var channelIcon = n.channel === 'telegram' ? 'send' : n.channel === 'email' ? 'email' : 'settings';
+      return '<div class="px-space-md py-3 flex items-start gap-3 hover:bg-surface-container-low/30 transition-colors">' +
+        '<span class="w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ' + dot + '"></span>' +
+        '<div class="flex-1 min-w-0">' +
+          '<div class="flex items-center justify-between gap-2 mb-0.5">' +
+            '<div class="flex items-center gap-2">' +
+              '<span class="font-data-mono text-[11px] font-semibold text-on-surface">' + hm(n.at) + ' IST</span>' +
+              '<span class="inline-flex px-1.5 py-0.5 rounded font-label-sm text-[10px] font-semibold ' + levelBadge + '">' + esc(n.level) + '</span>' +
+              (n.flight ? '<span class="font-data-mono text-[11px] text-secondary font-semibold">' + esc(n.flight) + '</span>' : '') +
+            '</div>' +
+            (n.channel !== 'system' ? '<div class="flex items-center gap-1 text-[10px] text-on-surface-variant"><span class="material-symbols-outlined text-[13px]">' + channelIcon + '</span>' +
+              '<span class="font-data-mono">' + esc(n.channel) + (n.status ? ' · ' + esc(n.status) : '') + '</span></div>' : '') +
+          '</div>' +
+          '<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">' + esc(n.message) + '</p>' +
+        '</div></div>';
+    }).join('') + '</div>';
+  }
+
+  // ===== API USAGE PAGE =====
+  function renderApiUsagePage() {
+    var d = state.data, u = d.usage;
+    // Metrics
+    $('au-requests').textContent = u ? u.requests : '—';
+    $('au-units').textContent = u ? u.units : '—';
+    $('au-limit').textContent = u ? u.unitLimit : '—';
+    $('au-remaining').textContent = u ? Math.max(0, u.unitLimit - u.units) : '—';
+    var pct = u && u.unitLimit ? (u.units / u.unitLimit) * 100 : 0;
+    var health = !u ? 'Unavailable' : u.suspended ? 'Suspended' : pct >= 85 ? 'Watch' : 'Healthy';
+    $('au-health').textContent = health;
+    $('au-health').className = 'font-headline-lg text-headline-lg font-semibold tracking-tight ' + (health === 'Healthy' ? 'text-on-tertiary-container' : 'text-error');
+    // Provider cards
+    $('au-adb-card').innerHTML =
+      '<div class="flex items-center justify-between"><div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[18px] text-primary">data_thresholding</span>' +
+      '<span class="font-label-md text-label-md font-semibold text-on-surface">AeroDataBox</span></div>' +
+      '<span class="font-data-mono text-[11px] font-semibold ' + (health === 'Healthy' ? 'text-on-tertiary-container' : 'text-error') + '">' + health + '</span></div>' +
+      '<div class="flex flex-col gap-1 p-2.5 rounded-lg bg-surface-container-low">' +
+        '<div class="flex justify-between font-label-sm text-label-sm"><span class="text-on-surface font-semibold">API Quota</span>' +
+        '<span class="font-data-mono text-on-surface font-semibold">' + (u ? u.units + ' / ' + u.unitLimit : '—') + '</span></div>' +
+        '<div class="w-full h-1.5 bg-surface-container rounded-full overflow-hidden"><div class="h-full rounded-full ' + (health === 'Healthy' ? 'bg-secondary' : 'bg-error') + '" style="width:' + Math.min(100, pct).toFixed(1) + '%"></div></div>' +
+        '<div class="flex justify-between font-data-mono text-[10px] text-on-surface-variant"><span>Requests: ' + (u ? u.requests + '/' + u.requestLimit : '—') + '</span>' +
+        '<span>Window: ' + (u ? u.window : '—') + '</span></div></div>' +
+      '<div class="flex justify-between items-center text-[11px]"><span class="text-on-surface-variant">Enabled</span><span class="font-data-mono text-on-tertiary-container font-semibold">Yes</span></div>';
+    $('au-opensky-card').innerHTML =
+      '<div class="flex items-center justify-between"><div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[18px] text-primary">radar</span>' +
+      '<span class="font-label-md text-label-md font-semibold text-on-surface">OpenSky Network</span></div>' +
+      '<span class="font-data-mono text-[11px] font-semibold text-on-tertiary-container">Active</span></div>' +
+      '<div class="flex flex-col gap-1 p-2.5 rounded-lg bg-surface-container-low">' +
+        '<div class="flex justify-between font-label-sm text-label-sm"><span class="text-on-surface font-semibold">Type</span><span class="font-data-mono text-on-surface">ADS-B Live Positions</span></div>' +
+        '<div class="flex justify-between font-label-sm text-label-sm"><span class="text-on-surface font-semibold">Cost</span><span class="font-data-mono text-on-surface">Free / unlimited</span></div>' +
+        '<div class="flex justify-between font-label-sm text-label-sm"><span class="text-on-surface font-semibold">Auth</span><span class="font-data-mono text-on-surface">Anonymous or keyed</span></div></div>' +
+      '<div class="flex justify-between items-center text-[11px]"><span class="text-on-surface-variant">Enabled</span><span class="font-data-mono text-on-tertiary-container font-semibold">Yes</span></div>';
+    $('au-telegram-card').innerHTML =
+      '<div class="flex items-center justify-between"><div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[18px] text-primary">send</span>' +
+      '<span class="font-label-md text-label-md font-semibold text-on-surface">Telegram Dispatch</span></div>' +
+      '<span class="font-data-mono text-[11px] font-semibold text-on-tertiary-container">Active</span></div>' +
+      '<div class="flex flex-col gap-1 p-2.5 rounded-lg bg-surface-container-low">' +
+        '<div class="flex justify-between font-label-sm text-label-sm"><span class="text-on-surface font-semibold">Type</span><span class="font-data-mono text-on-surface">Bot notifications</span></div>' +
+        '<div class="flex justify-between font-label-sm text-label-sm"><span class="text-on-surface font-semibold">Cost</span><span class="font-data-mono text-on-surface">Free / unlimited</span></div>' +
+        '<div class="flex justify-between font-label-sm text-label-sm"><span class="text-on-surface font-semibold">Delivery</span><span class="font-data-mono text-on-surface">Coordinator alerts</span></div></div>' +
+      '<div class="flex justify-between items-center text-[11px]"><span class="text-on-surface-variant">Enabled</span><span class="font-data-mono text-on-tertiary-container font-semibold">Yes</span></div>';
+    // Request history table
+    var reqs = d.apiRequests || [];
+    if (!reqs.length) {
+      $('au-rows').innerHTML = '<tr><td colspan="7" class="py-6 px-4 text-center text-on-surface-variant">No API requests recorded.</td></tr>';
+    } else {
+      $('au-rows').innerHTML = reqs.slice().reverse().map(function (r, i) {
+        var ok = r.status === 'OK';
+        return '<tr class="hover:bg-surface-container-low/40 transition-colors ' + (i % 2 ? 'bg-surface-container-low/20' : 'bg-surface-container-lowest') + '">' +
+          '<td class="py-2.5 px-4 whitespace-nowrap font-data-mono text-[12px] text-on-surface-variant">' + hm(r.at) + '</td>' +
+          '<td class="py-2.5 px-3 whitespace-nowrap"><span class="font-label-sm text-label-sm font-semibold text-on-surface">' + esc(r.provider) + '</span></td>' +
+          '<td class="py-2.5 px-3 whitespace-nowrap font-data-mono text-[11px] text-on-surface-variant">' + esc(r.endpoint) + '</td>' +
+          '<td class="py-2.5 px-3 whitespace-nowrap font-data-mono text-[12px] text-secondary font-semibold">' + esc(r.flight || '—') + '</td>' +
+          '<td class="py-2.5 px-3 whitespace-nowrap font-data-mono text-[12px] text-on-surface">' + r.units + '</td>' +
+          '<td class="py-2.5 px-3 whitespace-nowrap font-data-mono text-[12px] text-on-surface-variant">' + r.responseMs + 'ms</td>' +
+          '<td class="py-2.5 px-3 whitespace-nowrap"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded font-label-sm text-[10px] font-semibold ' +
+            (ok ? 'bg-tertiary-fixed text-on-tertiary-fixed-variant' : 'bg-error-container text-on-error-container') + '">' +
+            '<span class="w-1.5 h-1.5 rounded-full ' + (ok ? 'bg-on-tertiary-container' : 'bg-error') + '"></span>' + esc(r.status) + '</span></td></tr>';
+      }).join('');
+    }
+  }
+
+  // ===== SETTINGS PAGE =====
+  function renderSettingsPage() {
+    var d = state.data, cfg = d.config || {};
+    function card(icon, title, rows) {
+      return '<div class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md flex flex-col gap-space-sm">' +
+        '<div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[18px] text-primary">' + icon + '</span>' +
+        '<span class="font-label-md text-label-md font-semibold text-on-surface">' + esc(title) + '</span></div>' +
+        '<div class="flex flex-col">' + rows.map(function (r) {
+          var valClass = r[2] || '';
+          return '<div class="flex justify-between items-center py-2 border-b border-outline-variant/10 last:border-b-0">' +
+            '<span class="font-label-sm text-label-sm text-on-surface-variant">' + esc(r[0]) + '</span>' +
+            '<span class="font-data-mono text-data-mono text-on-surface font-medium ' + valClass + '">' + esc(r[1]) + '</span></div>';
+        }).join('') + '</div></div>';
+    }
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    $('settings-grid').innerHTML = [
+      card('flight', 'Tracking Configuration', [
+        ['Home Airport', cfg.HOME_AIRPORT || 'BLR'],
+        ['Check Interval', (cfg.CHECK_INTERVAL_MIN || 5) + ' minutes'],
+        ['Notify Lead Time', (cfg.NOTIFY_LEAD_MIN || 40) + ' minutes'],
+        ['Timezone', cfg.TIMEZONE || 'Asia/Kolkata']
+      ]),
+      card('local_taxi', 'Cab Suggestions', [
+        ['Mode', 'Suggestions only (nothing assigned)'],
+        ['Max passengers per suggestion', String(cfg.MAX_SEATS || 4)],
+        ['Grouping window', (cfg.GROUPING_WINDOW_MIN || 45) + ' minutes'],
+        ['Log Retention', (cfg.LOG_RETENTION_DAYS || 14) + ' days']
+      ]),
+      card('terminal', 'API Providers', [
+        ['AeroDataBox', cfg.ADB_ENABLED ? 'Enabled' : 'Disabled', cfg.ADB_ENABLED ? 'text-on-tertiary-container' : 'text-error'],
+        ['ADB Cycle Day', String(cfg.ADB_CYCLE_DAY || 15)],
+        ['OpenSky Network', cfg.OPENSKY_ENABLED ? 'Enabled' : 'Disabled', cfg.OPENSKY_ENABLED ? 'text-on-tertiary-container' : 'text-error'],
+        ['FlightAware', cfg.FA_ENABLED ? 'Enabled' : 'Disabled', cfg.FA_ENABLED ? 'text-on-tertiary-container' : 'text-error']
+      ]),
+      card('notifications', 'Notification Channels', [
+        ['Telegram Alerts', cfg.TELEGRAM_ALERTS ? 'Enabled' : 'Disabled', cfg.TELEGRAM_ALERTS ? 'text-on-tertiary-container' : 'text-error'],
+        ['Email Alerts', cfg.EMAIL_ALERTS ? 'Enabled' : 'Disabled', cfg.EMAIL_ALERTS ? 'text-on-tertiary-container' : 'text-error'],
+        ['Coordinator', 'Configured in script properties'],
+        ['Bot Token', '••••••• (hidden)']
+      ]),
+      card('info', 'System Information', [
+        ['Engine Status', state.data.tickTriggers >= 1 ? 'Active' : 'Stopped', state.data.tickTriggers >= 1 ? 'text-on-tertiary-container' : 'text-error'],
+        ['Tick Triggers', String(state.data.tickTriggers != null ? state.data.tickTriggers : '—')],
+        ['Runtime', 'Google Apps Script V8'],
+        ['Environment', 'Local Preview (Offline)']
+      ]),
+      card('palette', 'Appearance', [
+        ['Theme', dark ? 'Dark' : 'Light'],
+        ['Font', 'Inter (Google Fonts)'],
+        ['Design System', 'Material 3 / Stitch'],
+        ['Tailwind CSS', '3.4.16 (CDN)']
+      ])
+    ].join('');
+  }
+
+  // ===== ASSISTANT =====
+  var aCard = $('flight-assistant-card'), aTrigger = $('flight-assistant-trigger'), aInput = $('assistant-input');
+  function setAssistantOpen(open) {
+    aCard.classList.toggle('hidden', !open); aCard.classList.toggle('flex', open);
+    aTrigger.setAttribute('aria-expanded', open);
+    if (open) aInput.focus();
+  }
+  aTrigger.addEventListener('click', function () { setAssistantOpen(aCard.classList.contains('hidden')); });
+  $('assistant-close').addEventListener('click', function () { setAssistantOpen(false); });
+  $$('[data-suggest]').forEach(function (b) {
+    b.addEventListener('click', function () { aInput.value = b.querySelector('span').textContent.trim(); aInput.focus(); });
+  });
+  function bubble(text, mine) {
+    var el = document.createElement('div');
+    el.className = mine ? 'self-end max-w-[85%] px-3 py-2 rounded-lg bg-primary text-on-primary font-body-sm text-[12px]'
+      : 'p-3 rounded-lg bg-surface-container-low/60 border border-outline-variant/10 text-on-surface font-body-sm text-body-sm leading-relaxed';
+    el.textContent = text;
+    $('assistant-thread').appendChild(el);
+    $('assistant-thread').scrollTop = $('assistant-thread').scrollHeight;
+  }
+  function renderAssistantState(d) {
+    var on = !!(d && d.assistant && d.assistant.enabled);
+    $('assistant-state').textContent = on ? 'Online · Ground Ops Agent' : 'Not connected';
+    $('assistant-dot').className = 'w-1.5 h-1.5 rounded-full ' + (on ? 'bg-on-tertiary-container' : 'bg-outline');
+  }
+  $('assistant-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var q = aInput.value.trim();
+    if (!q) return;
+    bubble(q, true); aInput.value = '';
+    var on = state.data && state.data.assistant && state.data.assistant.enabled;
+    if (!on || !(window.google && google.script)) {
+      bubble('The assistant is not connected yet, so nothing was sent.', false);
+      return;
+    }
+    google.script.run.withSuccessHandler(function (r) { bubble(r && r.text ? r.text : 'No answer.', false); })
+      .withFailureHandler(function (e) { bubble('The assistant failed: ' + (e && e.message || e), false); }).askAssistant(q);
+  });
+
+  // ===== EVENT BINDINGS =====
+  // Overview direction tabs
+  $$('[data-dir]').forEach(function (b) {
+    b.addEventListener('click', function () { state.overview.dir = b.getAttribute('data-dir'); if (state.data) renderOverviewTable(); });
+  });
+  $('search').addEventListener('input', function (e) { state.overview.query = e.target.value.trim(); if (state.data) renderOverviewTable(); });
+  // Flights page: filter tabs, search, sort, view, expand/collapse (state survives refreshes and reorders)
+  $('fl-filters').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-fl-filter]'); if (!b) return;
+    state.flights.filter = b.getAttribute('data-fl-filter'); state.flights.mapRefit = true; if (state.data) renderFlightsPage();
+  });
+  $('fl-search').addEventListener('input', function (e) { state.flights.query = e.target.value.trim(); state.flights.mapRefit = true; if (state.data) renderFlightsPage(); });
+  $('fl-sort').addEventListener('change', function (e) { state.flights.sort = e.target.value; saveFlightPrefs(); if (state.data) renderFlightsPage(); });
+  $$('[data-fl-view]').forEach(function (b) {
+    b.addEventListener('click', function () { state.flights.view = b.getAttribute('data-fl-view'); saveFlightPrefs(); if (state.data) renderFlightsPage(); });
+  });
+  $$('[data-fl-expand]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var all = b.getAttribute('data-fl-expand') === 'all';
+      ((state.flights.lastView || {}).ordered || []).forEach(function (f) { setCardOpen(f.id, all); });
+    });
+  });
+  document.getElementById('page-flights').addEventListener('click', function (e) {
+    var t = e.target.closest('[data-toggle]');
+    if (t) { var id = t.getAttribute('data-toggle'); setCardOpen(id, !state.flights.expanded[id]); return; }
+    var gs = e.target.closest('[data-goto-suggestion]');
+    if (gs) { state.highlightSuggestion = gs.getAttribute('data-goto-suggestion'); location.hash = 'cab-suggestions'; return; }
+    var j = e.target.closest('[data-jump]');
+    if (j) {
+      var jid = j.getAttribute('data-jump');
+      if (state.flights.view !== 'cards') { state.flights.view = 'cards'; renderFlightsPage(); }
+      var card = document.querySelector('[data-card="' + CSS.escape(jid) + '"]');
+      if (!card) { state.flights.filter = 'ALL'; state.flights.query = ''; $('fl-search').value = ''; state.flights.mapRefit = true; renderFlightsPage(); card = document.querySelector('[data-card="' + CSS.escape(jid) + '"]'); }
+      if (card) { setCardOpen(jid, true); highlightFlight(jid, false); card.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      return;
+    }
+    var sel = e.target.closest('[data-select]');
+    if (sel) { highlightFlight(sel.getAttribute('data-select'), true); return; }
+    var sm = e.target.closest('[data-show-map]');
+    if (sm) { showOnMap(sm.getAttribute('data-show-map')); return; }
+    if (e.target.closest('[data-fl-clear]')) { state.flights.filter = 'ALL'; state.flights.query = ''; $('fl-search').value = ''; state.flights.mapRefit = true; renderFlightsPage(); }
+  });
+  $('fl-map-toggle').addEventListener('click', function () { setMapHidden(!state.flights.mapHidden); });
+  $('fl-map-fit').addEventListener('click', function () { if (state.data && state.flights.lastView) { state.flights.mapRefit = true; renderSharedMap(state.flights.lastView, flightsCtx()); } });
+  if (state.flights.mapHidden) setMapHidden(true);
+  $('fl-sim-eta').addEventListener('click', function () {
+    var P = window.__FT_PREVIEW__; if (!P || !state.data) return;
+    var next = FS.upcomingInbounds(state.data.flights, state.data.generatedAt, 24 * 60 * 60000, 1)[0];
+    if (next) { P.shiftEta(next.id, 60); load(); }
+  });
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest('[data-flight-link]');
+    if (!a) return;
+    e.preventDefault();
+    var id = a.getAttribute('data-flight-link');
+    state.flights.expanded[id] = true; state.flights.selected = id; state.flights.view = 'cards'; state.pendingFlight = id;
+    if (location.hash === '#flights') renderFlightsPage(); else location.hash = 'flights';
+  });
+  // Notifications level tabs
+  $$('[data-nf-level]').forEach(function (b) {
+    b.addEventListener('click', function () { state.notif.level = b.getAttribute('data-nf-level'); if (state.data) renderNotificationsPage(); });
+  });
+  $('nf-search').addEventListener('input', function (e) { state.notif.query = e.target.value.trim(); if (state.data) renderNotificationsPage(); });
+  // Refresh buttons (global)
+  $$('[data-refresh]').forEach(function (b) { b.addEventListener('click', load); });
+  // Sidebar nav clicks (prevent default hash jump scroll)
+  $$('nav [data-page]').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      var page = a.getAttribute('data-page');
+      location.hash = page;
+    });
+  });
+
+  // ===== TICKER =====
+  function tickAgo() {
+    if (!state.loadedAt) return;
+    var m = mins(Date.now(), state.loadedAt);
+    $('synced-ago').textContent = m < 1 ? 'Synced just now' : 'Synced ' + dur(m) + ' ago';
+  }
+  setInterval(tickAgo, 30000);
+  setInterval(function () { if (!document.hidden) load(); }, REFRESH_MS);
+
+  // ===== INIT =====
+  navigate(location.hash.slice(1) || 'overview');
+  load();
+})();
+</script>
+</body>
+</html>

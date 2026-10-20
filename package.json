@@ -1,0 +1,14 @@
+{
+  "name": "faculty-flight-tracker",
+  "private": true,
+  "description": "Google Apps Script flight tracker + cab grouping for visiting faculty",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node test/run-tests.js && node test/adb-tests.js && node test/setup-tests.js && node test/dashboard-tests.js && node test/telegram-tests.js && node test/flight-sort-tests.js && node test/flight-position-tests.js && node test/cab-suggestions-tests.js",
+    "doctor": "node tools/doctor.js",
+    "preview": "node tools/preview-server.js",
+    "push": "clasp push"
+  }
+}

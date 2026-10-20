@@ -1,0 +1,48 @@
+# Ignore patterns only. A rule here does NOT protect a secret that was already committed:
+# if that ever happens, rotate the key (BotFather /revoke, RapidAPI "regenerate") first.
+
+# --- Secrets and local credentials ---------------------------------------------
+.env
+.env.*
+!.env.example
+# clasp login credentials (normally in your home folder, ignored here in case they're copied in)
+.clasprc.json
+# clasp project binding: points at YOUR Apps Script project; each developer makes their own
+# from .clasp.json.example (see README "Deploy with clasp")
+.clasp.json
+*.pem
+*.p12
+*.key
+client_secret*.json
+*credentials*.json
+service-account*.json
+
+# --- Real data (faculty names and phone numbers) ----------------------------------
+# The travel-details spreadsheet and exports stay out of the repository.
+*.xlsx
+*.xls
+*.csv
+
+# --- Local scratch that may hold secrets or real data -----------------------------
+/scratch/
+/tmp/
+*.local.*
+
+# --- Dependencies, test output, logs ---------------------------------------------
+node_modules/
+coverage/
+test-output/
+*.log
+npm-debug.log*
+
+# --- Local Telegram assistant (local-assistant/) ------------------------------------
+# Its filled-in config is already covered by ".env.*" above; keep the example tracked.
+!.env.local-assistant.example
+# Polling offset and the Google OAuth token
+local-assistant/.state/
+
+# --- OS / editor artifacts -------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
