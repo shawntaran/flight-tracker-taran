@@ -9,7 +9,8 @@ function onOpen() {
     .addSeparator()
     .addItem('Open dashboard', 'openDashboard')
     .addItem('Test a flight lookup (uses 2 AeroDataBox units)', 'testFlightLookup')
-    .addItem('Run a check now', 'tick')
+    .addItem('Run a check now', 'runCheckNow')
+    .addItem('Force check a flight now (uses AeroDataBox units)', 'forceCheckFlight')
     .addItem('Send current cab plan to coordinators', 'sendCabPlan')
     .addItem('Send test alert', 'sendTestAlert')
     .addItem('Show Telegram chat ids', 'listTelegramChats')
@@ -33,6 +34,97 @@ function removeTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'tick') ScriptApp.deleteTrigger(t);
   });
+}
+
+var CHECK_BUSY_MSG = 'A check is already running; try again in a minute.';
+
+/**
+ * Menu "Run a check now": one tracker run, then says what it did. Only rows that are due are looked up;
+ * "Force check a flight now" is the way to look up a row that is not due.
+ */
+function runCheckNow() {
+  var ui = SpreadsheetApp.getUi(), lock = LockService.getScriptLock();
+  if (!lock.tryLock(30 * 1000)) { ui.alert(CHECK_BUSY_MSG); return; }
+  var res;
+  try {
+    res = runTick_(Date.now());
+  } catch (e) {
+    var msg = redactSecrets(e && e.message || e);
+    logEvent('ERROR', '', 'Run a check now failed: ' + msg);
+    ui.alert('The check failed: ' + msg);
+    return;
+  } finally { lock.releaseLock(); }
+  ui.alert(describeCheckRun_(res));
+}
+
+/** Pure: runTick_ result -> the "Run a check now" message. */
+function describeCheckRun_(res) {
+  return 'Check finished at ' + fmtTimeIST(res.at) + ' IST: ' + res.lookupsDue + ' provider lookup' + (res.lookupsDue === 1 ? '' : 's') +
+    ' due, ' + res.lookupsMade + ' request' + (res.lookupsMade === 1 ? '' : 's') + ' made, ' + res.rowsUpdated + ' row' +
+    (res.rowsUpdated === 1 ? '' : 's') + ' updated, ' + res.alertsQueued + ' alert' + (res.alertsQueued === 1 ? '' : 's') + ' sent.' +
+    (res.lookupsDue ? '' : '\nNo row was due for a provider lookup. Use "Force check a flight now" to look one up anyway.') +
+    '\nRepeated identical alerts within ' + ALERT_REPEAT_MIN + ' min are not sent twice.';
+}
+
+/** Menu "Force check a flight now": provider lookup for chosen rows now, within budget and the per-flight cap. */
+function forceCheckFlight() {
+  var ui = SpreadsheetApp.getUi();
+  var a = ui.prompt('Force check a flight now', 'Row ID(s) from the Flights tab (column ID), comma-separated, for example F12, F15:', ui.ButtonSet.OK_CANCEL);
+  if (a.getSelectedButton() !== ui.Button.OK) return;
+  var C = cfg();
+  var plan = planForceCheck_(a.getResponseText(), readFlights().map(function (r) { return prepareRow(r, C); }), C);
+  if (plan.error) { ui.alert(plan.error); return; }
+  if (ui.alert('Force check', plan.text, ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30 * 1000)) { ui.alert(CHECK_BUSY_MSG); return; }
+  var res;
+  try {
+    res = runTick_(Date.now(), { forceIds: plan.ids });
+  } catch (e) {
+    var msg = redactSecrets(e && e.message || e);
+    logEvent('ERROR', '', 'Force check failed: ' + msg);
+    ui.alert('The force check failed: ' + msg);
+    return;
+  } finally { lock.releaseLock(); }
+  ui.alert('Force check finished', describeForceResults_(res), ui.ButtonSet.OK);
+}
+
+/**
+ * Pure: the typed IDs + prepared Flights rows -> {ids, text} for the confirmation, or {error}.
+ * Units are estimated with the same Tier-2 cost as "Test a flight lookup"; a cached answer may cost 0.
+ */
+function planForceCheck_(input, rows, C) {
+  var ids = [];
+  String(input || '').split(/[\s,;]+/).forEach(function (x) { x = x.trim().toUpperCase(); if (x && ids.indexOf(x) < 0) ids.push(x); });
+  if (!ids.length) return { error: 'No row ID entered. Use the ID column of the Flights tab, for example F12.' };
+  if (ids.length > 10) return { error: 'At most 10 rows per force check (' + ids.length + ' entered).' };
+  var byId = {};
+  rows.forEach(function (r) { byId[String(r.id).toUpperCase()] = r; });
+  var unknown = ids.filter(function (id) { return !byId[id]; });
+  if (unknown.length) return { error: 'Not found on the Flights tab: ' + unknown.join(', ') + '. Nothing was checked.' };
+  var unit = ADB_TIER_UNITS[ADB_ENDPOINTS.flightStatus.tier], willCall = 0;
+  var lines = ids.map(function (id) {
+    var r = byId[id], left = Math.max(0, C.MAX_ADB_CALLS_PER_FLIGHT - r.adbCalls);
+    var refuse = !r.active ? 'Active is unticked: will be refused' : r.flightNorm === 'INVALID' ? 'flight number not recognised: will be refused'
+      : isFinal(r) ? 'already ' + r.status + ': will be refused' : !isTrackable(r) ? (r.lastError || 'no usable time') + ': will be refused'
+        : left <= 0 ? 'per-flight cap reached: no request will be sent' : '';
+    if (!refuse) willCall++;
+    return '• ' + r.id + ' ' + r.flightNorm + ' ' + (r.name || '') + ': ' + left + ' of ' + C.MAX_ADB_CALLS_PER_FLIGHT +
+      ' per-flight calls left' + (refuse ? ' (' + refuse + ')' : '');
+  });
+  return { ids: ids, willCall: willCall, text: ids.length + ' row' + (ids.length === 1 ? '' : 's') + ', estimated up to ' + willCall * unit +
+    ' AeroDataBox units (' + unit + ' per lookup; 0 if a recent answer is cached).\n' + lines.join('\n') +
+    '\n\nEach lookup counts against the monthly budget and the row\'s per-flight cap. Continue?' };
+}
+
+/** Pure: runTick_ result -> one line per forced row. */
+function describeForceResults_(res) {
+  var label = { checked: 'checked', cap: 'not sent: per-flight cap reached', final: 'refused: already final', inactive: 'refused: inactive',
+    invalid: 'refused', blocked: 'not sent (budget, suspension or usage store)', failed: 'lookup failed' };
+  return res.forced.map(function (f) {
+    return f.id + ' ' + f.flight + ' ' + f.name + ': ' + label[f.outcome] + '. Status ' + (f.status || '—') + (f.eta ? ', ' + f.eta + ' IST' : '') +
+      (f.source ? ' (' + f.source + ')' : '') + (f.error ? '. ' + f.error : '') + '. Calls used now: ' + f.callsUsed + ', left: ' + f.callsLeft + '.';
+  }).join('\n') + '\n\nAlerts for any change were sent as in a normal check.';
 }
 
 function sendCabPlan() {

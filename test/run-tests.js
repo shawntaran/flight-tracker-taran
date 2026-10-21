@@ -698,5 +698,105 @@ test('two arrivals: delay alert, failures alert, cab plan, landed', () => {
   assert.ok(sent.some(([to, m]) => to === 'tg:99' && /LANDED/.test(m) && /pickup/.test(m)), JSON.stringify(sent));
 });
 
+console.log('force check and "Run a check now"');
+const OK_LEGS = () => ({ ok: true, attempted: true, legs: [mkLeg('DXB', 'BLR', '2026-10-20 22:15Z', '2026-10-21 02:30Z', 'Expected')] });
+test('normal runs are unchanged: same calls, rows and alerts with or without an (unrelated) force list', () => {
+  const scenario = (opts) => {
+    const h = tickHarness([tickRow(), tickRow({ _row: 3, id: 'B', flightRaw: 'QR572', adbCalls: 1 })], { adb: () => OK_LEGS() });
+    const times = ['2026-10-20 12:00', '2026-10-20 22:00', '2026-10-21 04:00', '2026-10-21 09:00'];
+    const results = times.map((t) => h.c.runTick_(h.c.parseIstInput(t), opts));
+    return plain({ sheet: h.sheet, calls: h.adbCalls.length, sent: h.sent, due: results.map((r) => [r.lookupsDue, r.lookupsMade]) });
+  };
+  const plainRun = scenario(undefined), withForceList = scenario({ forceIds: [] }), sendPlan = scenario({});
+  assert.deepStrictEqual(withForceList, plainRun);
+  assert.deepStrictEqual(sendPlan, plainRun);
+  assert.ok(plainRun.calls > 0, 'the scenario does make lookups');
+});
+test('a forced row that is not due makes exactly one gateway call and reports "checked"', () => {
+  const h = tickHarness([tickRow()], { adb: () => OK_LEGS() });
+  const notDue = h.c.parseIstInput('2026-10-20 12:00');           // T-6h check is at 21:45
+  assert.strictEqual(h.c.runTick_(notDue).lookupsMade, 0, 'not due: nothing without force');
+  const r = h.c.runTick_(notDue, { forceIds: ['a'] });            // IDs are case-insensitive
+  assert.strictEqual(h.adbCalls.length, 1);
+  assert.strictEqual(r.forced.length, 1);
+  assert.deepStrictEqual([r.forced[0].outcome, r.forced[0].callsUsed, r.forced[0].callsLeft], ['checked', 1, 3]);
+  assert.strictEqual(r.lookupsDue, 1);
+  assert.strictEqual(h.sheet[0].adbCalls, 1, 'counts toward the per-flight cap');
+});
+test('a forced row skips the "OpenSky already confirms it airborne" shortcut', () => {
+  const t = '2026-10-21 05:00';
+  const h = tickHarness([tickRow({ status: 'DEPARTED', schedDepAt: '2026-10-20T22:15:00Z', lastFixAt: new Date(Date.parse('2026-10-20T23:25:00Z')).toISOString(),
+    etaAt: '2026-10-21T02:30:00Z', etaSource: 'live (OpenSky, 900 km out)', nextCheckAt: '2026-10-20T23:00:00Z', stateKey: '' })], { adb: () => OK_LEGS() });
+  h.c.openskyStates = () => ({ ok: false, error: 'skip' });
+  h.c.runTick_(h.c.parseIstInput(t));
+  const unforced = h.adbCalls.length;
+  assert.strictEqual(unforced, 0, 'without force the shortcut applies (fix 5 min old)');
+  h.c.runTick_(h.c.parseIstInput(t), { forceIds: ['A'] });
+  assert.strictEqual(h.adbCalls.length - unforced, 1);
+});
+test('a forced row at the per-flight cap makes zero calls and reports "cap"', () => {
+  const h = tickHarness([tickRow({ adbCalls: 4 })], { adb: () => { throw new Error('must not be called'); } });
+  const r = h.c.runTick_(h.c.parseIstInput('2026-10-20 22:00'), { forceIds: ['A'] });
+  assert.strictEqual(h.adbCalls.length, 0);
+  assert.strictEqual(r.forced[0].outcome, 'cap');
+  assert.ok(/per-flight cap of 4/.test(r.forced[0].error));
+});
+test('forced final, inactive, invalid and unknown rows are refused without a call', () => {
+  const h = tickHarness([tickRow({ status: 'LANDED' }), tickRow({ _row: 3, id: 'B', active: false }), tickRow({ _row: 4, id: 'C', flightRaw: 'tbd' })],
+    { adb: () => { throw new Error('must not be called'); } });
+  const r = h.c.runTick_(h.c.parseIstInput('2026-10-20 22:00'), { forceIds: ['A', 'B', 'C', 'Z9'] });
+  assert.deepStrictEqual(r.forced.map((f) => f.outcome), ['final', 'inactive', 'invalid', 'invalid']);
+  assert.ok(/already LANDED/.test(r.forced[0].error) && /no such row/.test(r.forced[3].error));
+  assert.strictEqual(h.adbCalls.length, 0);
+});
+test('the force-check confirmation lists rows, Tier-2 units and calls left; unknown IDs stop it', () => {
+  const c = freshCtx(), C = c.defaultConfig();
+  const rows = [c.prepareRow(tickRow({ adbCalls: 1 }), C), c.prepareRow(tickRow({ _row: 3, id: 'B', status: 'LANDED' }), C)];
+  const p = c.planForceCheck_('a, b, a', rows, C);
+  assert.deepStrictEqual([...p.ids], ['A', 'B']);
+  assert.ok(/2 rows, estimated up to 2 AeroDataBox units \(2 per lookup/.test(p.text), p.text);
+  assert.ok(/A EK568 Dr A: 3 of 4 per-flight calls left/.test(p.text) && /already LANDED: will be refused/.test(p.text), p.text);
+  assert.ok(/Not found on the Flights tab: X1/.test(c.planForceCheck_('A, X1', rows, C).error));
+  assert.ok(c.planForceCheck_('  ', rows, C).error);
+});
+function menuCtx(lockFree, prompt) {
+  const c = freshCtx(), shown = [];
+  const ui = { alert: (...a) => { shown.push(a.filter((x) => typeof x === 'string').join(' | ')); return 'YES'; },
+    prompt: () => ({ getSelectedButton: () => 'OK', getResponseText: () => prompt || 'A' }),
+    Button: { OK: 'OK', YES: 'YES' }, ButtonSet: { OK_CANCEL: 1, YES_NO: 2, OK: 3 } };
+  let ran = 0;
+  Object.assign(c, {
+    SpreadsheetApp: { getUi: () => ui },
+    LockService: { getScriptLock: () => ({ tryLock: () => lockFree, releaseLock() {} }) },
+    cfg: () => c.defaultConfig(), readFlights: () => [tickRow()], logEvent() {},
+    runTick_: (now, o) => { ran++; return { at: now, lookupsDue: 2, lookupsMade: 3, rowsUpdated: 1, alertsQueued: 1,
+      forced: (o && o.forceIds || []).map((id) => ({ id, flight: 'EK568', name: 'Dr A', outcome: 'checked', status: 'DELAYED', eta: 'Wed 21 Oct 08:33', source: 'AeroDataBox', error: '', callsUsed: 1, callsLeft: 2 })) }; }
+  });
+  return { c, shown, ran: () => ran };
+}
+test('a busy lock gives a visible message from "Run a check now" and "Force check" (never silent)', () => {
+  for (const fn of ['runCheckNow', 'forceCheckFlight']) {
+    const m = menuCtx(false);
+    m.c[fn]();
+    assert.strictEqual(m.ran(), 0, fn + ' must not run without the lock');
+    assert.ok(m.shown.some((t) => /already running; try again in a minute/.test(t)), fn + ': ' + m.shown.join(' / '));
+  }
+});
+test('"Run a check now" reports lookups due and made, rows updated and alerts', () => {
+  const m = menuCtx(true);
+  m.c.runCheckNow();
+  assert.ok(/^Check finished at \d\d:\d\d IST: 2 provider lookups due, 3 requests made, 1 row updated, 1 alert sent\./.test(m.shown[0]), m.shown[0]);
+  const f = menuCtx(true);
+  f.c.forceCheckFlight();
+  assert.strictEqual(f.ran(), 1);
+  assert.ok(f.shown.some((t) => /A EK568 Dr A: checked\. Status DELAYED/.test(t)), f.shown.join(' / '));
+});
+test('the menu points "Run a check now" at runCheckNow; the trigger handler stays tick()', () => {
+  const src = fs.readFileSync(path.join(srcDir, 'Menu.js'), 'utf8');
+  assert.ok(/addItem\('Run a check now', 'runCheckNow'\)/.test(src));
+  assert.ok(/addItem\('Force check a flight now \(uses AeroDataBox units\)', 'forceCheckFlight'\)/.test(src));
+  assert.ok(/newTrigger\('tick'\)/.test(src));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

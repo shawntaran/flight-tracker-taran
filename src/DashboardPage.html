@@ -560,9 +560,32 @@
         '<td class="py-3.5 px-3 whitespace-nowrap' + dim + '">' + cabCell(f, groups, d.maxSeats) + '</td>' +
         '<td class="py-3.5 pr-4 pl-2 text-right whitespace-nowrap">' + (!f.active
           ? '<span class="font-data-mono text-[11px] text-on-surface-variant">Inactive</span>'
-          : '<button disabled class="p-1 rounded text-on-surface-variant ft-off" title="Row actions are not available yet" type="button"><span class="material-symbols-outlined text-[18px]">more_vert</span></button>') + '</td></tr>';
+          : forceCheckButton(f)) + '</td></tr>';
     }).join('');
   }
+
+  // ---- Force check (Apps Script web app only; owner-only deployment). The server shows the same
+  // confirmation as the menu item and uses the same lock and code path (Dashboard.js).
+  var canForce = !!(window.google && google.script && google.script.run && google.script.run.forceCheckFromDashboard);
+  function forceCheckButton(f) {
+    var why = !canForce ? 'Force check runs only in the deployed dashboard, not in the local preview'
+      : f.final ? 'Already ' + f.status + ': nothing to check' : f.invalid ? 'Flight number not recognised' : '';
+    return '<button type="button" ' + (why ? 'disabled title="' + esc(why) + '" class="ft-off ' : 'data-force="' + esc(f.id) + '" title="Look this flight up now (uses AeroDataBox units)" class="hover:bg-surface-container ') +
+      'px-2 py-1 rounded bg-surface-container-low text-secondary font-label-sm text-label-sm font-semibold">Force check</button>';
+  }
+  $('rows').addEventListener('click', function (ev) {
+    var b = ev.target.closest && ev.target.closest('[data-force]');
+    if (!b) return;
+    var id = b.getAttribute('data-force');
+    b.disabled = true; b.textContent = 'Checking…';
+    var done = function (text) { alert(text); load(); };
+    google.script.run.withSuccessHandler(function (p) {
+      if (!p.ok) return done(p.error);
+      if (!confirm(p.text)) { b.disabled = false; b.textContent = 'Force check'; return; }
+      google.script.run.withSuccessHandler(function (r) { done(r.ok ? r.text : r.error); })
+        .withFailureHandler(function (e) { done('The force check failed: ' + (e && e.message || e)); }).forceCheckFromDashboard(id);
+    }).withFailureHandler(function (e) { done('Could not prepare the force check: ' + (e && e.message || e)); }).forceCheckPlanFromDashboard(id);
+  });
 
   function renderAttention(d) {
     var items = d.flights.filter(function (f) { return f.active && (IMPACT[f.status] || (f.lastError && !f.final)); });

@@ -42,6 +42,32 @@ function getDashboardData() {
   return buildDashboardData_(f);
 }
 
+/**
+ * Dashboard "Force check" button, step 1: the same confirmation text as the menu item (rows, estimated
+ * units, per-flight calls left). Sends nothing. The web app is owner-only (appsscript.json).
+ */
+function forceCheckPlanFromDashboard(id) {
+  var C = cfg();
+  var plan = planForceCheck_(String(id || ''), readFlights().map(function (r) { return prepareRow(r, C); }), C);
+  return plan.error ? { ok: false, error: plan.error } : { ok: true, text: plan.text, willCall: plan.willCall };
+}
+
+/** Step 2, after the person confirms: the menu's code path and lock. Never waits silently on a busy lock. */
+function forceCheckFromDashboard(id) {
+  var plan = forceCheckPlanFromDashboard(id);
+  if (!plan.ok) return plan;
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30 * 1000)) return { ok: false, error: CHECK_BUSY_MSG };
+  try {
+    var res = runTick_(Date.now(), { forceIds: [String(id).trim().toUpperCase()] });
+    return { ok: true, text: describeForceResults_(res), outcome: res.forced[0] ? res.forced[0].outcome : '' };
+  } catch (e) {
+    var msg = redactSecrets(e && e.message || e);
+    logEvent('ERROR', '', 'Force check from the dashboard failed: ' + msg);
+    return { ok: false, error: 'The force check failed: ' + msg };
+  } finally { lock.releaseLock(); }
+}
+
 /** Pure: sheet facts -> plain JSON for the page (google.script.run cannot return Date objects). */
 function buildDashboardData_(f) {
   var C = f.config;

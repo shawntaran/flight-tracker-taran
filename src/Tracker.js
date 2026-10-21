@@ -200,12 +200,26 @@ function tick() {
   }
 }
 
+/**
+ * One tracker run. opts.sendPlan: also send the full cab plan. opts.forceIds: row IDs to check with the
+ * provider now (menu "Force check"), even if not due and even if OpenSky already confirms them airborne.
+ * Forced rows still go through fetchFlightInfo (budget, dedupe, cache) and the per-flight cap; final,
+ * inactive and invalid rows are refused. Without forceIds a run behaves exactly as before.
+ * -> {at, lookupsDue, lookupsMade, rowsUpdated, alertsQueued, forced: [{id, flight, name, outcome, status,
+ *     eta, source, error, callsUsed, callsLeft}]}
+ *    outcome: checked | cap | final | inactive | invalid | blocked | failed
+ */
 function runTick_(now, opts) {
   opts = opts || {};
   var C = cfg();
   loadExtraAirlines();
   var rows = readFlights().map(function (r) { return prepareRow(r, C); });
   var out = new Outbox();
+  var forced = {}, forcedOutcome = {};
+  (opts.forceIds || []).forEach(function (id) { forced[String(id).trim().toUpperCase()] = true; });
+  var isForced = function (r) { return !!forced[String(r.id).toUpperCase()]; };
+  var before = {}, callsBefore = {}, lookupsDue = 0;
+  rows.forEach(function (r) { before[r.id] = [r.status, r.etaAt, r.revDepAt].join('|'); callsBefore[r.id] = r.adbCalls; });
   adbResetExecution_();
   rows.forEach(function (r) { purgeExpiredProviderData(r, now, C); });
   purgeOldLogs_(now, C);
@@ -239,19 +253,29 @@ function runTick_(now, opts) {
   // 2. Provider checks (AeroDataBox via the budgeted gateway, FlightAware as backup)
   var freshInfo = {}; // row id -> this tick's provider info (in memory only)
   rows.forEach(function (r) {
+    var force = isForced(r);
+    if (force) {
+      var refused = !r.active ? 'inactive' : r.flightNorm === 'INVALID' ? 'invalid' : isFinal(r) ? 'final' : !isTrackable(r) ? 'invalid' : '';
+      if (refused) { forcedOutcome[r.id] = refused; return; }
+    }
     if (!isTrackable(r)) return;
-    var due = r.nextCheckAt || initialCheckTime(r, C);
+    var due = force ? now : r.nextCheckAt || initialCheckTime(r, C);
     if (!due || now < due) return;
-    if (r.status === 'DEPARTED' && r.lastFixAt && now - r.lastFixAt < 15 * MIN && due < (r.etaAt || 0)) {
+    if (!force && r.status === 'DEPARTED' && r.lastFixAt && now - r.lastFixAt < 15 * MIN && due < (r.etaAt || 0)) {
       r.nextCheckAt = nextCheckTime(r, now, C); // OpenSky already confirms it is airborne
       return;
     }
     // Per-flight cap covers every external provider request (AeroDataBox + FlightAware + first-leg).
     var left = C.MAX_ADB_CALLS_PER_FLIGHT - r.adbCalls;
-    if (left <= 0) return;
+    if (left <= 0) {
+      if (force) forcedOutcome[r.id] = 'cap';
+      return;
+    }
+    lookupsDue++;
     var res = fetchFlightInfo(r, left);
     r.adbCalls += res.attempts || 0;
     r.lastCheckDisp = fmtIST(now);
+    if (force) forcedOutcome[r.id] = res.ok ? 'checked' : res.blocked && !res.attempts ? 'blocked' : 'failed';
     if (!res.ok && res.blocked && !res.attempts) {
       // Nothing was sent (budget / suspension / usage store). Never let that read as "on time".
       markUnknown_(r);
@@ -362,7 +386,33 @@ function runTick_(now, opts) {
   if (opts.sendPlan) out.coord('Current cab plan:\n' + (plan.groups.map(describeGroup).join('\n') || '(none)'));
 
   writeFlights(rows);
+  var alertsQueued = out.coordMsgs.length + out.directMsgs.length; // before the repeat filter in flush
   out.flush(C);
+  return tickSummary_(rows, opts.forceIds || [], forcedOutcome, before, callsBefore, lookupsDue, alertsQueued, now, C);
+}
+
+/** Pure: what a run did, for the menu messages and the heartbeat. */
+function tickSummary_(rows, forceIds, forcedOutcome, before, callsBefore, lookupsDue, alertsQueued, now, C) {
+  var byId = {}, made = 0, updated = 0;
+  rows.forEach(function (r) {
+    byId[String(r.id).toUpperCase()] = r;
+    made += Math.max(0, r.adbCalls - (callsBefore[r.id] || 0));
+    if (before[r.id] !== [r.status, r.etaAt, r.revDepAt].join('|')) updated++;
+  });
+  var forced = forceIds.map(function (id) {
+    var r = byId[String(id).trim().toUpperCase()];
+    if (!r) return { id: String(id), flight: '', name: '', outcome: 'invalid', status: '', eta: '', source: '', error: 'no such row on the Flights tab', callsUsed: 0, callsLeft: 0 };
+    var outcome = forcedOutcome[r.id] || 'failed';
+    var reason = { cap: 'per-flight cap of ' + C.MAX_ADB_CALLS_PER_FLIGHT + ' provider calls reached; no request sent',
+      final: 'already ' + r.status + '; nothing to check', inactive: 'Active is unticked', invalid: r.lastError || 'flight number or time not usable' }[outcome];
+    return {
+      id: r.id, flight: r.flightNorm, name: r.name || '', outcome: outcome, status: r.status,
+      eta: fmtIST(r.dir === 'ARR' ? (r.etaAt || r.schedArrAt) : (r.revDepAt || r.schedDepAt)), source: r.etaSource || '',
+      error: reason || (outcome === 'checked' ? '' : r.lastError || ''), callsUsed: Math.max(0, r.adbCalls - (callsBefore[r.id] || 0)),
+      callsLeft: Math.max(0, C.MAX_ADB_CALLS_PER_FLIGHT - r.adbCalls)
+    };
+  });
+  return { at: now, lookupsDue: lookupsDue, lookupsMade: made, rowsUpdated: updated, alertsQueued: alertsQueued, forced: forced };
 }
 
 /**
