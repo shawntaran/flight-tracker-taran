@@ -282,9 +282,9 @@
     };
   }
 
-  /** The Operations Assistant: the preview server sends {messages, context} to the configured model (tools/ops-assistant.js). */
-  function postAssistant(payload) {
-    return fetch('/api/assistant', {
+  /** The Operations Assistant: the preview server sends {messages, context} (or a Smart Cab Plan {input}) to the configured model (tools/ops-assistant.js). */
+  function postAssistant(payload, url) {
+    return fetch(url || '/api/assistant', {
       method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (j) {
@@ -332,6 +332,13 @@
           if (typeof failureHandler === 'function') failureHandler(err);
         });
       },
+      smartDispatch: function (input) {
+        postAssistant({ input: input }, '/api/dispatch').then(function (r) {
+          if (typeof successHandler === 'function') successHandler(r);
+        }).catch(function (err) {
+          if (typeof failureHandler === 'function') failureHandler(err);
+        });
+      },
       getAssistantStatus: function () {
         getAssistantStatus().then(function (s) {
           if (typeof successHandler === 'function') successHandler(s);
@@ -349,6 +356,7 @@
     withFailureHandler: function (cb) { return createRunner(null, cb); },
     getDashboardData: function () { createRunner(null, null).getDashboardData(); },
     askAssistant: function (p) { createRunner(null, null).askAssistant(p); },
+    smartDispatch: function (i) { createRunner(null, null).smartDispatch(i); },
     getAssistantStatus: function () { createRunner(null, null).getAssistantStatus(); }
   };
 

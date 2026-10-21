@@ -14,7 +14,8 @@ const PREVIEW_MODULES = {
   '/flight-sort.js': path.join(__dirname, 'flight-sort.js'),
   '/guest-view.js': path.join(__dirname, 'guest-view.js'),
   '/flight-position.js': path.join(__dirname, 'flight-position.js'),
-  '/cab-suggestions.js': path.join(__dirname, 'cab-suggestions.js')
+  '/cab-suggestions.js': path.join(__dirname, 'cab-suggestions.js'),
+  '/smart-dispatch.js': path.join(__dirname, 'smart-dispatch.js')
 };
 // The production grouping rules, read (never written) from src/ and wrapped in one function scope so their
 // Apps Script globals stay out of the page: window.FTGrouping = {planGroups, defaultConfig}.
@@ -52,8 +53,11 @@ function sendJson(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
-/** POST /api/assistant {messages, context} -> {text} | {error}. JSON only, so other sites cannot post here without a CORS preflight (never answered). */
-function handleAssistant(req, res) {
+/**
+ * POST /api/assistant {messages, context} and POST /api/dispatch {input} -> {text} | {error}.
+ * JSON only, so other sites cannot post here without a CORS preflight (never answered).
+ */
+function handleModelPost(req, res, method) {
   if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
   if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON only' });
   let body = '', tooBig = false;
@@ -67,7 +71,7 @@ function handleAssistant(req, res) {
     if (tooBig) return;
     let parsed;
     try { parsed = JSON.parse(body); } catch (e) { return sendJson(res, 400, { error: 'invalid JSON' }); }
-    Promise.resolve().then(() => getOpsAssistant().ask(parsed)).then((r) => {
+    Promise.resolve().then(() => getOpsAssistant()[method](parsed)).then((r) => {
       if (r.ok) sendJson(res, 200, { text: r.text });
       else sendJson(res, 502, { error: r.error });
     }).catch((err) => sendJson(res, 500, { error: String(err && err.message || err) }));
@@ -161,7 +165,12 @@ function handleRequest(req, res) {
   }
 
   if (pathname === '/api/assistant') {
-    handleAssistant(req, res);
+    handleModelPost(req, res, 'ask');
+    return;
+  }
+
+  if (pathname === '/api/dispatch') {
+    handleModelPost(req, res, 'dispatch');
     return;
   }
 

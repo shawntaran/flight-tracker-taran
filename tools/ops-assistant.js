@@ -5,6 +5,7 @@
 // OpenAI-compatible client. Read-only: the model can only return text.
 
 const { createLlm } = require('../local-assistant/src/llm');
+const SmartDispatch = require('./smart-dispatch');
 
 const MAX_TURNS = 12;            // most recent user/assistant messages sent to the model
 const MAX_MESSAGE_CHARS = 2000;
@@ -12,15 +13,17 @@ const MAX_CONTEXT_CHARS = 60000; // JSON of the flight data; bigger payloads are
 const MIN_TIMEOUT_MS = 120000;   // interactive use: allow for the model being loaded into memory on first use
 // No hidden thinking: with it, Gemma 4 can spend the whole token budget reasoning and return an empty answer.
 const CHAT_OPTIONS = { maxTokens: 800, reasoningEffort: 'none' };
+// Smart Cab Plan: a longer JSON answer, constrained to SmartDispatch.RESPONSE_SCHEMA where the server supports it.
+const DISPATCH_OPTIONS = { maxTokens: 1500, reasoningEffort: 'none', responseFormat: { type: 'json_object' } };
 // Ollama loads models with a small context window (often 4096 tokens) and silently drops the START of a longer
 // prompt, which is where the rules are. Its OpenAI-compatible /v1 API cannot change that, so on Ollama the
 // native /api/chat is used with a window sized to the prompt.
 const MIN_CTX = 8192, MAX_CTX = 32768;
 
 /** Pure: messages -> num_ctx (power of two) that holds them plus the answer, at ~3 characters per token. */
-function contextWindowFor(messages) {
+function contextWindowFor(messages, maxTokens) {
   const chars = messages.reduce((n, m) => n + m.content.length, 0);
-  const need = Math.ceil(chars / 3) + CHAT_OPTIONS.maxTokens + 512;
+  const need = Math.ceil(chars / 3) + (maxTokens || CHAT_OPTIONS.maxTokens) + 512;
   let ctx = MIN_CTX;
   while (ctx < need && ctx < MAX_CTX) ctx *= 2;
   return ctx;
@@ -42,12 +45,14 @@ function createOllamaChat({ baseUrl, model, timeoutMs, fetch }) {
     }
     return isOllama;
   }
-  async function chat(messages) {
+  /** opts.maxTokens; opts.format: a JSON schema the answer must follow (Ollama structured outputs). */
+  async function chat(messages, opts) {
+    const o = opts || {}, maxTokens = o.maxTokens || CHAT_OPTIONS.maxTokens;
     let r;
     try {
       r = await call('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages, stream: false, think: false,
-          options: { temperature: 0, num_predict: CHAT_OPTIONS.maxTokens, num_ctx: contextWindowFor(messages) } }) }, timeoutMs);
+        body: JSON.stringify(Object.assign({ model, messages, stream: false, think: false,
+          options: { temperature: 0, num_predict: maxTokens, num_ctx: contextWindowFor(messages, maxTokens) } }, o.format ? { format: o.format } : {})) }, timeoutMs);
     } catch (e) {
       return { ok: false, error: e && e.name === 'AbortError' ? 'timed out after ' + timeoutMs + ' ms' : String((e && e.message) || e).slice(0, 160) };
     }
@@ -94,7 +99,14 @@ function buildMessages(body) {
   return { ok: true, messages: [{ role: 'system', content: buildSystemPrompt(b.context) }].concat(turns) };
 }
 
-/** -> {ask(body) -> {ok, text} | {ok: false, error}, status() -> {online, model, detail}}. Never throws for model problems. */
+/** Pure: dispatch request body -> {ok, messages} | {ok: false, error}. The prompt is fixed server-side; the page sends only data. */
+function buildDispatchMessages(body) {
+  const input = body && typeof body === 'object' ? body.input : null;
+  if (input && JSON.stringify(input).length > MAX_CONTEXT_CHARS) return { ok: false, error: 'the cab plan is too large to send to the model' };
+  return SmartDispatch.buildMessages(input);
+}
+
+/** -> {ask(body), dispatch(body) -> {ok, text} | {ok: false, error}, status() -> {online, model, detail}}. Never throws for model problems. */
 function createOpsAssistant(opts) {
   const o = opts || {};
   let llm = o.llm, ollama = null;
@@ -113,12 +125,21 @@ function createOpsAssistant(opts) {
     return ollama && await ollama.detect() ? ollama.chat(m.messages) : llm.chat(m.messages, CHAT_OPTIONS);
   }
 
+  /** Smart Cab Plan: the model's raw JSON text; the page parses and checks it (tools/smart-dispatch.js). */
+  async function dispatch(body) {
+    const m = buildDispatchMessages(body);
+    if (!m.ok) return m;
+    return ollama && await ollama.detect()
+      ? ollama.chat(m.messages, { maxTokens: DISPATCH_OPTIONS.maxTokens, format: SmartDispatch.RESPONSE_SCHEMA })
+      : llm.chat(m.messages, DISPATCH_OPTIONS);
+  }
+
   async function status() {
     const h = await llm.health();
     return { online: h.reachable && h.modelListed === true, model: h.model, detail: h.detail };
   }
 
-  return { ask, status };
+  return { ask, dispatch, status };
 }
 
-module.exports = { createOpsAssistant, buildMessages, buildSystemPrompt, contextWindowFor };
+module.exports = { createOpsAssistant, buildMessages, buildSystemPrompt, buildDispatchMessages, contextWindowFor };

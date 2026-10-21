@@ -7,6 +7,8 @@
  *   explains the result. It stores nothing and has no driver, vehicle or dispatch fields.
  * - Arrivals only. Times go through FlightSort so an unreadable ETA falls back to the schedule instead of
  *   reaching planGroups as a string.
+ * - applyOverride() layers a coordinator-approved Smart Cab Plan change (tools/smart-dispatch.js) on top of the model,
+ *   in memory only, re-checking seats and the stretch limit against the current times.
  * Loaded by tools/preview-app.html as window.CabSuggestions and by test/cab-suggestions-tests.js.
  */
 (function (root, factory) {
@@ -35,7 +37,7 @@
 
   /**
    * flights: dashboard flights. opts: {planGroups, config, nowMs, home, fs (FlightSort)}.
-   * -> {shared: [suggestion], individual: [suggestion], excluded: [{f, reason}], byFlight: {id: info}, config}
+   * -> {shared: [suggestion], individual: [suggestion], excluded: [{f, reason}], byFlight: {id: info}, config, plan, overrides}
    */
   function build(flights, opts) {
     var fs = opts.fs, C = opts.config, now = opts.nowMs, home = opts.home || 'BLR';
@@ -83,8 +85,18 @@
         key: g.id, kind: members.length > 1 ? 'shared' : 'individual', terminal: terminal, airport: g.airport,
         pickupMs: g.pickupMs, firstMs: first, lastMs: last, members: members, reason: reason, pickupPassed: g.pickupMs < now
       };
-    }).sort(function (a, b) { return a.pickupMs - b.pickupMs || a.key.localeCompare(b.key); });
+    });
 
+    var model = finalize(all, { windowMin: C.GROUP_WINDOW_MIN, maxSeats: C.MAX_SEATS, bufferMin: C.ARRIVAL_BUFFER_MIN });
+    model.excluded = arrivals.filter(function (f) { return !model.byFlight[f.id]; })
+      .map(function (f) { return { f: f, reason: excludedReason(f, fs, now) }; });
+    model.plan = plan; // the raw planGroups() result, for the Smart Cab Plan
+    return model;
+  }
+
+  /** Suggestions -> numbered model with the per-flight index. Shared by build() and applyOverride(). */
+  function finalize(all, config) {
+    all = all.slice().sort(function (a, b) { return a.pickupMs - b.pickupMs || a.key.localeCompare(b.key); });
     var shared = all.filter(function (s) { return s.kind === 'shared'; });
     var individual = all.filter(function (s) { return s.kind === 'individual'; });
     shared.forEach(function (s, i) { s.number = i + 1; s.label = 'Suggested Cab ' + s.number; });
@@ -94,16 +106,56 @@
     all.forEach(function (s) {
       s.members.forEach(function (m) {
         byFlight[m.f.id] = { kind: s.kind, number: s.number || null, key: s.key, label: s.label, pickupMs: s.pickupMs,
-          terminal: s.terminal, size: s.members.length, reason: s.reason,
+          terminal: s.terminal, size: s.members.length, reason: s.reason, override: !!s.override,
           with: s.members.filter(function (o) { return o.f.id !== m.f.id; }).map(function (o) { return o.f; }) };
       });
     });
-    var excluded = arrivals.filter(function (f) { return !byFlight[f.id]; })
-      .map(function (f) { return { f: f, reason: excludedReason(f, fs, now) }; });
-
-    return { shared: shared, individual: individual, excluded: excluded, byFlight: byFlight,
-      config: { windowMin: C.GROUP_WINDOW_MIN, maxSeats: C.MAX_SEATS, bufferMin: C.ARRIVAL_BUFFER_MIN } };
+    return { shared: shared, individual: individual, excluded: [], byFlight: byFlight, config: config, overrides: [] };
   }
 
-  return { build: build };
+  /**
+   * Applies one checked Smart Cab Plan suggestion ({affected, groups: [[flight id]], reasoning, action}) to a model.
+   * The listed guests ride together as given; whoever is left in the cabs they leave keeps a cab of their own.
+   * opts: {nowMs, maxStretchMin}. -> {ok, model} | {ok: false, error}. The input model is not changed.
+   */
+  function applyOverride(model, sg, opts) {
+    var now = opts.nowMs, maxStretch = opts.maxStretchMin, cfg = model.config;
+    var all = model.shared.concat(model.individual), member = {}, cabOf = {};
+    all.forEach(function (s) { s.members.forEach(function (m) { member[m.f.id] = m; cabOf[m.f.id] = s; }); });
+    var affected = [].concat.apply([], sg.groups);
+    var missing = affected.filter(function (id) { return !member[id]; });
+    if (missing.length) return { ok: false, error: 'no longer in the cab plan: ' + missing.join(', ') };
+
+    var seq = (model.overrides || []).length + 1, made = [];
+    function entry(members, reason, override) {
+      members = members.slice().sort(function (a, b) { return a.t - b.t; });
+      var first = members[0].t, last = members[members.length - 1].t;
+      var terms = members.map(function (m) { return termLabel(cabOf[m.f.id].terminal); })
+        .filter(function (t, i, a) { return t && a.indexOf(t) === i; });
+      return { key: 'AI-' + seq + '-' + (made.length + 1), kind: members.length > 1 ? 'shared' : 'individual',
+        terminal: terms[0] || '', terminals: terms, crossTerminal: terms.length > 1, airport: cabOf[members[0].f.id].airport,
+        pickupMs: last + cfg.bufferMin * MIN, firstMs: first, lastMs: last, members: members, reason: reason,
+        pickupPassed: last + cfg.bufferMin * MIN < now, override: override };
+    }
+    for (var i = 0; i < sg.groups.length; i++) {
+      var ms = sg.groups[i].map(function (id) { return member[id]; });
+      var e = entry(ms, 'AI override: ' + sg.reasoning, { action: sg.action });
+      var spread = Math.round((e.lastMs - e.firstMs) / MIN);
+      if (ms.length > cfg.maxSeats) return { ok: false, error: ms.length + ' guests exceed ' + cfg.maxSeats + ' seats' };
+      if (maxStretch != null && spread > maxStretch) return { ok: false, error: 'arrivals are now ' + spread + ' min apart (limit ' + maxStretch + ')' };
+      made.push(e);
+    }
+    var kept = [];
+    all.forEach(function (s) {
+      var rest = s.members.filter(function (m) { return affected.indexOf(m.f.id) < 0; });
+      if (rest.length === s.members.length) kept.push(s);
+      else if (rest.length) made.push(entry(rest, 'Left in this cab after an AI override moved ' + (s.members.length - rest.length) + ' guest(s) out.', s.override || null));
+    });
+    var next = finalize(kept.concat(made), cfg);
+    next.excluded = model.excluded; next.plan = model.plan;
+    next.overrides = (model.overrides || []).concat([sg]);
+    return { ok: true, model: next };
+  }
+
+  return { build: build, applyOverride: applyOverride };
 });

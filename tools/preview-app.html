@@ -145,6 +145,7 @@
 <script src="/flight-position.js"></script>
 <script src="/grouping-bundle.js"></script>
 <script src="/cab-suggestions.js"></script>
+<script src="/smart-dispatch.js"></script>
 <script src="/mock-bridge.js"></script>
 </head>
 <body class="bg-background font-body-md text-body-md text-on-surface antialiased">
@@ -690,6 +691,10 @@
           </div>
           <button id="assistant-close" class="p-1 text-on-surface-variant hover:text-on-surface rounded hover:bg-surface-container transition-colors" title="Minimize assistant" type="button"><span class="material-symbols-outlined text-[16px]">close</span></button>
         </div>
+        <div class="px-3 py-2 border-b border-outline-variant/20 flex items-center gap-2">
+          <button id="smart-plan-btn" type="button" class="flex-1 h-8 px-3 rounded-lg bg-secondary text-on-secondary hover:opacity-90 disabled:opacity-50 transition-opacity font-label-md text-[12px] font-semibold flex items-center justify-center gap-1.5" title="Ask the model to review the rule-based cab plan for merges and delay handling"><span class="material-symbols-outlined text-[16px]">auto_fix_high</span>Generate Smart Cab Plan</button>
+          <button id="smart-reset" type="button" class="hidden h-8 px-2.5 rounded-lg bg-surface-container-low text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors font-label-md text-[11px] whitespace-nowrap" title="Undo every applied override and return to the rule-based plan">Reset overrides (<span id="smart-count">0</span>)</button>
+        </div>
         <div id="assistant-thread" class="p-4 flex flex-col gap-3 max-h-[380px] overflow-y-auto" aria-live="polite">
           <div class="p-3 rounded-lg bg-surface-container-low/60 border border-outline-variant/10 text-on-surface font-body-sm text-body-sm leading-relaxed">Hello. How can I assist with today's arrivals or cab schedules?</div>
           <div class="flex flex-col gap-1.5">
@@ -883,10 +888,23 @@
     } else {
       var C = G.defaultConfig();
       if (d.maxSeats) C.MAX_SEATS = d.maxSeats;
-      state.cabs = CabSuggestions.build(d.flights, { planGroups: G.planGroups, config: C, nowMs: d.generatedAt, home: d.homeAirport || 'BLR', fs: FS });
+      state.cabs = reapplyOverrides(CabSuggestions.build(d.flights, { planGroups: G.planGroups, config: C, nowMs: d.generatedAt, home: d.homeAirport || 'BLR', fs: FS }), d.generatedAt);
     }
     state.cabsFor = d;
     return state.cabs;
+  }
+  // Smart Cab Plan overrides the coordinator applied (in memory only). Each data load rebuilds the rule-based plan,
+  // then re-applies them in order; one that no longer fits the new times (seats, stretch limit, guest gone) is dropped.
+  function reapplyOverrides(cm, now) {
+    var kept = [];
+    (state.cabOverrides || []).forEach(function (sg) {
+      var r = CabSuggestions.applyOverride(cm, sg, { nowMs: now, maxStretchMin: window.SmartDispatch ? SmartDispatch.MAX_STRETCH_MIN : null });
+      if (r.ok) { cm = r.model; kept.push(sg); }
+      else bubble('An applied cab override no longer fits the latest flight times and was undone: ' + r.error + '.', 'error');
+    });
+    state.cabOverrides = kept;
+    if (typeof updateSmartToolbar === 'function') updateSmartToolbar();
+    return cm;
   }
   function cabInfo(id) { var m = cabModel(); return (m && m.byFlight[id]) || null; }
   function cabExcluded(id) { var m = cabModel(), x = m ? m.excluded.filter(function (e) { return e.f.id === id; })[0] : null; return x ? x.reason : ''; }
@@ -1674,12 +1692,14 @@
 
   function suggestionCard(sg, now) {
     var shared = sg.kind === 'shared';
-    var meet = sg.terminal ? 'Terminal ' + sg.terminal.replace(/^T/, '') + ' · arrivals' : 'Arrivals · terminal not confirmed';
+    var meet = sg.crossTerminal ? 'Terminals ' + sg.terminals.join(' → ') + ' · start at ' + sg.terminals[0]
+      : sg.terminal ? 'Terminal ' + sg.terminal.replace(/^T/, '') + ' · arrivals' : 'Arrivals · terminal not confirmed';
     return '<article data-suggestion="' + esc(sg.key) + '" class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md flex flex-col gap-space-sm">' +
       '<div class="flex items-start justify-between gap-2">' +
         '<div class="flex items-center gap-2 min-w-0"><span class="w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ' + (shared ? 'bg-secondary-fixed text-on-secondary-fixed' : 'bg-surface-container text-on-surface-variant') + '">' +
           '<span class="material-symbols-outlined text-[18px]">' + (shared ? 'local_taxi' : 'person') + '</span></span>' +
-          '<div class="flex flex-col min-w-0"><h3 class="font-headline-sm text-headline-sm text-primary tracking-tight">' + esc(sg.label) + '</h3>' +
+          '<div class="flex flex-col min-w-0"><h3 class="font-headline-sm text-headline-sm text-primary tracking-tight flex items-center gap-1.5 flex-wrap">' + esc(sg.label) +
+            (sg.override ? '<span class="px-1.5 rounded bg-tertiary-fixed text-on-tertiary-fixed-variant font-label-sm text-[10px] uppercase" title="Applied from the Smart Cab Plan">AI override</span>' : '') + '</h3>' +
           '<span class="font-body-sm text-[12px] text-on-surface-variant">' + esc(meet) + '</span></div></div>' +
         '<span class="shrink-0 px-2 py-0.5 rounded-full bg-surface-container font-data-mono text-[11px] text-on-surface">' + sg.members.length + (sg.members.length === 1 ? ' passenger' : ' passengers') + '</span></div>' +
       '<div class="flex items-baseline gap-x-2 gap-y-1 flex-wrap"><span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant">Suggested pickup</span>' +
@@ -1714,7 +1734,8 @@
       }).join('') + '</div>' : '<p class="font-body-sm text-[12px] text-on-surface-variant">No delays, cancellations, diversions, landings or unverified arrivals right now.</p>');
     var sharing = cm.shared.reduce(function (n, x) { return n + x.members.length; }, 0);
     $('cs-summary').textContent = cm.error || (cm.shared.length + (cm.shared.length === 1 ? ' shared suggestion' : ' shared suggestions') + ' for ' + sharing + ' people · ' +
-      cm.individual.length + ' individual ' + (cm.individual.length === 1 ? 'pickup' : 'pickups'));
+      cm.individual.length + ' individual ' + (cm.individual.length === 1 ? 'pickup' : 'pickups') +
+      (cm.overrides && cm.overrides.length ? ' · ' + cm.overrides.length + ' AI ' + (cm.overrides.length === 1 ? 'override' : 'overrides') + ' applied' : ''));
     $('cs-shared').innerHTML = cm.shared.length ? cm.shared.map(function (x) { return suggestionCard(x, now); }).join('')
       : '<p class="md:col-span-2 bg-surface-container-lowest rounded-xl shadow-sm p-space-md font-body-sm text-body-sm text-on-surface-variant">No arrivals are close enough to share a cab right now.</p>';
     $('cs-individual-wrap').classList.toggle('hidden', !cm.individual.length);
@@ -2081,6 +2102,169 @@
     if (!q.trim() || chat.busy) return;
     aInput.value = '';
     askAssistant(q);
+  });
+
+  // ===== SMART CAB PLAN =====
+  // The model reviews the rule-based plan (planGroups) with the raw flight times and proposes overrides
+  // (tools/smart-dispatch.js builds the data, the server holds the prompt, the page checks every answer).
+  // Apply Override changes the in-memory cab model only: nothing is booked, sent or saved.
+  var smart = { busy: false, runs: 0, items: {} };
+  var ACTION_META = {
+    MERGE_CABS: ['merge', 'Merge cabs'], CROSS_TERMINAL: ['swap_horiz', 'Cross-terminal pickup'],
+    WAIT_FOR_DELAYED: ['hourglass_top', 'Wait for delayed guest'], LEAVE_BEHIND: ['directions_car', 'Go ahead without delayed guest'],
+    MOVE_GUEST: ['move_up', 'Move guest']
+  };
+  function updateSmartToolbar() {
+    var n = (state.cabOverrides || []).length;
+    $('smart-count').textContent = n;
+    $('smart-reset').classList.toggle('hidden', !n);
+  }
+  function setSmartBusy(busy) {
+    smart.busy = busy;
+    $('smart-plan-btn').disabled = busy;
+    setBusy(busy);
+  }
+  /** The plan to review: planGroups() itself, or the current cabs as the same shape once overrides are applied. */
+  function planForReview(cm) {
+    if (!cm.overrides.length) return cm.plan.groups;
+    return cm.shared.concat(cm.individual).map(function (s) {
+      return { id: s.key, airport: s.airport, terminal: s.terminal || '?', pickupMs: s.pickupMs,
+        items: s.members.map(function (m) { return { r: { id: m.f.id }, t: m.t }; }) };
+    });
+  }
+  function cabLabels(cm) {
+    var out = {};
+    cm.shared.concat(cm.individual).forEach(function (s) {
+      out[s.key] = s.kind === 'shared' ? s.label : 'Individual (' + (s.members[0].f.name || s.members[0].f.flight) + ')';
+    });
+    return out;
+  }
+
+  function generateSmartPlan() {
+    if (smart.busy || chat.busy) return;
+    setAssistantOpen(true);
+    bubble('Generate Smart Cab Plan', 'user');
+    if (!state.data) { bubble('Flight data has not loaded yet. Try again in a moment.', 'error'); return; }
+    if (!window.SmartDispatch || !(google.script.run && google.script.run.smartDispatch)) { bubble('Smart Cab Plan is unavailable on this page.', 'error'); return; }
+    var cm = cabModel(), now = state.data.generatedAt;
+    if (cm.error) { bubble(cm.error, 'error'); return; }
+    var groups = planForReview(cm).filter(function (g) { return g.pickupMs >= now; });
+    if (!groups.length) { bubble('There are no upcoming arrival pickups to review.', 'assistant'); return; }
+    var C = window.FTGrouping.defaultConfig();
+    if (state.data.maxSeats) C.MAX_SEATS = state.data.maxSeats;
+    var ctx = SmartDispatch.buildInput(groups, state.data.flights, { config: C, nowMs: now, fs: FS, labels: cabLabels(cm) });
+    var typing = typingBubble();
+    setSmartBusy(true);
+    google.script.run.withSuccessHandler(function (r) {
+      typing.remove(); setSmartBusy(false);
+      var res = SmartDispatch.parse(r && r.text, ctx.index);
+      if (res.error) bubble('The model\'s answer could not be used (' + res.error + '). Try again.', 'error');
+      else renderSmartRun(res, ctx.index, groups.length);
+    }).withFailureHandler(function (e) {
+      typing.remove(); setSmartBusy(false);
+      bubble('Smart Cab Plan failed: ' + (e && e.message || e) + '. Check that Ollama is running (npm run assistant:health).', 'error');
+      chat.statusAt = 0; refreshAssistantStatus();
+    }).smartDispatch(ctx.input);
+  }
+
+  function renderSmartRun(res, index, cabCount) {
+    var run = ++smart.runs;
+    var wrap = document.createElement('div');
+    wrap.className = 'flex flex-col gap-2';
+    var n = res.suggestions.length;
+    var head = '<div class="px-0.5 flex items-center justify-between"><span class="font-label-sm text-[10px] uppercase tracking-wider text-on-surface-variant font-semibold">Smart Suggestions · ' + n + '</span>' +
+      '<span class="font-data-mono text-[10px] text-on-surface-variant">' + cabCount + ' cabs reviewed</span></div>';
+    var body = n ? res.suggestions.map(function (sg) {
+      var uid = 'r' + run + '-' + sg.id;
+      smart.items[uid] = { sg: sg, index: index, status: null, error: '' };
+      return smartCard(uid);
+    }).join('') : '<div class="p-3 rounded-lg bg-surface-container-low/60 border border-outline-variant/10 font-body-sm text-[12px] text-on-surface">The model found nothing worth changing: the rule-based plan stands.</div>';
+    var dropped = res.rejected.length ? '<p class="px-0.5 font-body-sm text-[11px] text-on-surface-variant" title="' + esc(res.rejected.map(function (x) { return x.action + ': ' + x.reason; }).join('\n')) + '">' +
+      res.rejected.length + ' more ' + (res.rejected.length === 1 ? 'suggestion was' : 'suggestions were') + ' discarded for breaking the limits (' + esc(res.rejected[0].reason) + (res.rejected.length > 1 ? ', …' : '') + ').</p>' : '';
+    wrap.innerHTML = head + body + dropped + '<p class="px-0.5 font-label-sm text-[10px] uppercase tracking-wider text-on-surface-variant/80">' + SUGGEST_NOTE + '</p>';
+    $('assistant-thread').appendChild(wrap);
+    scrollThread();
+  }
+
+  function smartGuest(index, id) {
+    var g = index.guests[id];
+    return '<li class="flex items-baseline justify-between gap-2"><span class="truncate text-on-surface">' + esc(g.name) + '</span>' +
+      '<span class="shrink-0 font-data-mono text-[10.5px] text-on-surface-variant">' + esc(g.flight) + ' · ' + hm(g.t) + (g.terminal && g.terminal !== '?' ? ' ' + esc(g.terminal) : '') + '</span></li>';
+  }
+  function smartChip(text, warn) {
+    return '<span class="px-1.5 py-px rounded font-data-mono text-[10px] ' + (warn ? 'bg-error-container text-on-error-container' : 'bg-surface-container text-on-surface-variant') + '">' + esc(text) + '</span>';
+  }
+  function smartCard(uid) {
+    var it = smart.items[uid], sg = it.sg, ix = it.index, meta = ACTION_META[sg.action] || ['tune', sg.action];
+    var delta = sg.cabDelta < 0 ? 'Saves ' + -sg.cabDelta + (sg.cabDelta === -1 ? ' cab' : ' cabs') : sg.cabDelta > 0 ? '+' + sg.cabDelta + (sg.cabDelta === 1 ? ' cab' : ' cabs') : 'Same cab count';
+    // Every number below is computed by the page from the flight data, not taken from the model.
+    var after = sg.after.map(function (g) {
+      var chips = [];
+      if (g.guests.length > 1) chips.push(smartChip(g.spreadMin + ' min spread' + (g.overWindowMin ? ' · ' + g.overWindowMin + ' over window' : ''), g.overWindowMin > 0));
+      if (g.crossTerminal) chips.push(smartChip(g.terminals.join(' → ') + ', start ' + g.startTerminal, true));
+      return '<div class="rounded-lg border border-outline-variant/20 p-2 flex flex-col gap-1">' +
+        '<div class="flex items-center justify-between gap-2"><span class="font-label-sm text-[10px] uppercase tracking-wider font-semibold ' + (g.leftover ? 'text-on-surface-variant' : 'text-secondary') + '">' + (g.leftover ? 'Stays behind' : 'New cab') + '</span>' +
+        '<span class="font-data-mono text-[11px] text-on-surface">pickup ~' + hm(g.pickupMs) + '</span></div>' +
+        '<ul class="flex flex-col gap-0.5 font-body-sm text-[12px]">' + g.guests.map(function (id) { return smartGuest(ix, id); }).join('') + '</ul>' +
+        (chips.length ? '<div class="flex flex-wrap gap-1">' + chips.join('') + '</div>' : '') + '</div>';
+    }).join('');
+    var foot = it.status === 'applied' ? '<span class="flex items-center gap-1 text-on-tertiary-container font-label-md text-[12px] font-semibold"><span class="material-symbols-outlined text-[16px]">check_circle</span>Override applied</span>'
+      : it.status === 'stale' ? '<span class="text-on-surface-variant font-body-sm text-[11px]">Superseded by another applied override. Generate a new plan.</span>'
+      : it.status === 'dismissed' ? '<span class="text-on-surface-variant font-body-sm text-[11px]">Dismissed</span>'
+      : (it.error ? '<span class="text-error font-body-sm text-[11px] flex-1">' + esc(it.error) + '</span>' : '<span class="flex-1"></span>') +
+        '<button type="button" data-smart-dismiss="' + uid + '" class="h-7 px-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container font-label-md text-[11px]">Dismiss</button>' +
+        '<button type="button" data-smart-apply="' + uid + '" class="h-7 px-2.5 rounded-lg bg-primary text-on-primary hover:opacity-90 font-label-md text-[11px] font-semibold flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">done</span>Apply Override</button>';
+    return '<article data-smart-card="' + uid + '" class="p-3 rounded-lg bg-surface-container-lowest border border-outline-variant/30 shadow-sm flex flex-col gap-2' + (it.status === 'dismissed' || it.status === 'stale' ? ' opacity-60' : '') + '">' +
+      '<div class="flex items-center justify-between gap-2"><span class="flex items-center gap-1.5 font-label-md text-[12.5px] font-semibold text-on-surface"><span class="material-symbols-outlined text-[16px] text-secondary">' + meta[0] + '</span>' + esc(meta[1]) + '</span>' +
+        smartChip(delta, false) + '</div>' +
+      '<p class="font-body-sm text-[12px] text-on-surface-variant leading-snug">' + esc(sg.reasoning) + '</p>' +
+      '<p class="font-body-sm text-[11px] text-on-surface-variant">Replaces ' + esc(sg.before.map(function (c) { return c.label; }).join(', ')) + '</p>' +
+      after +
+      '<div class="flex items-center justify-end gap-1.5 pt-0.5">' + foot + '</div></article>';
+  }
+  function redrawSmart(uid) {
+    var el = document.querySelector('[data-smart-card="' + CSS.escape(uid) + '"]');
+    if (el) el.outerHTML = smartCard(uid);
+  }
+  function guestsTouched(sg) { return [].concat.apply([], sg.before.map(function (c) { return c.members; })); }
+
+  /** Apply Override (mock dispatch): layers the suggestion onto the in-memory cab model and re-renders the pages. */
+  function applySmartOverride(uid) {
+    var it = smart.items[uid];
+    if (!it || it.status || !state.data) return;
+    var r = CabSuggestions.applyOverride(cabModel(), it.sg, { nowMs: state.data.generatedAt, maxStretchMin: SmartDispatch.MAX_STRETCH_MIN });
+    if (!r.ok) { it.error = 'Cannot apply: ' + r.error; redrawSmart(uid); return; }
+    state.cabOverrides = (state.cabOverrides || []).concat([it.sg]);
+    state.cabs = r.model; // state.cabsFor is unchanged, so the overridden model is what every page reads
+    it.status = 'applied'; it.error = '';
+    redrawSmart(uid);
+    // Pending suggestions about the same guests were made for the old plan.
+    var mine = guestsTouched(it.sg);
+    Object.keys(smart.items).forEach(function (k) {
+      var o = smart.items[k];
+      if (o.status || !guestsTouched(o.sg).some(function (id) { return mine.indexOf(id) >= 0; })) return;
+      o.status = 'stale'; redrawSmart(k);
+    });
+    updateSmartToolbar();
+    renderPage(state.page);
+  }
+  function resetSmartOverrides() {
+    state.cabOverrides = []; state.cabs = null;
+    Object.keys(smart.items).forEach(function (k) {
+      var o = smart.items[k];
+      if (o.status === 'applied' || o.status === 'stale') { o.status = null; redrawSmart(k); }
+    });
+    updateSmartToolbar();
+    if (state.data) renderPage(state.page);
+    bubble('All cab overrides were undone; the rule-based plan is back.', 'assistant');
+  }
+  $('smart-plan-btn').addEventListener('click', generateSmartPlan);
+  $('smart-reset').addEventListener('click', resetSmartOverrides);
+  $('assistant-thread').addEventListener('click', function (e) {
+    var a = e.target.closest('[data-smart-apply]');
+    if (a) { applySmartOverride(a.getAttribute('data-smart-apply')); return; }
+    var d = e.target.closest('[data-smart-dismiss]');
+    if (d) { var it = smart.items[d.getAttribute('data-smart-dismiss')]; if (it && !it.status) { it.status = 'dismissed'; redrawSmart(d.getAttribute('data-smart-dismiss')); } }
   });
 
   // ===== EVENT BINDINGS =====
