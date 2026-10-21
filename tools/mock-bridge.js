@@ -302,10 +302,11 @@
     return {
       withSuccessHandler: function (cb) { return createRunner(cb, failureHandler); },
       withFailureHandler: function (cb) { return createRunner(successHandler, cb); },
-      getDashboardData: function () {
+      getDashboardData: function (opts) {
         if (!USE_MOCK) {
-          // Live: the preview server reads the sheet's "Import" tab. Errors go to the page's failure banner.
-          fetch('/api/dashboard-data', { cache: 'no-store' }).then(function (r) {
+          // Live: the preview server reads the tracker's tabs (tools/sheet-source.js). {fresh: true} (a Refresh
+          // click) skips the server's 60 s cache. Errors go to the page's failure banner.
+          fetch('/api/dashboard-data' + (opts && opts.fresh ? '?fresh=1' : ''), { cache: 'no-store' }).then(function (r) {
             return r.json().then(function (j) {
               if (!r.ok || j.error) throw new Error(j.error || 'HTTP ' + r.status);
               return j;
@@ -354,7 +355,7 @@
   window.google.script.run = {
     withSuccessHandler: function (cb) { return createRunner(cb, null); },
     withFailureHandler: function (cb) { return createRunner(null, cb); },
-    getDashboardData: function () { createRunner(null, null).getDashboardData(); },
+    getDashboardData: function (o) { createRunner(null, null).getDashboardData(o); },
     askAssistant: function (p) { createRunner(null, null).askAssistant(p); },
     smartDispatch: function (i) { createRunner(null, null).smartDispatch(i); },
     getAssistantStatus: function () { createRunner(null, null).getAssistantStatus(); }

@@ -7,7 +7,8 @@ const path = require('path');
 
 const ENV_FILE = path.join(__dirname, '..', '.env.local-assistant');
 const KEYS = ['TG_BOT_TOKEN', 'ALLOWED_CHAT_IDS', 'GOOGLE_SPREADSHEET_ID', 'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET',
-  'LLM_BASE_URL', 'LLM_MODEL', 'LLM_API_KEY', 'LLM_TIMEOUT_MS', 'STATE_DIR', 'RATE_LIMIT_PER_MIN', 'MAX_QUESTION_CHARS'];
+  'LLM_BASE_URL', 'LLM_MODEL', 'LLM_API_KEY', 'LLM_TIMEOUT_MS', 'STATE_DIR', 'RATE_LIMIT_PER_MIN', 'MAX_QUESTION_CHARS',
+  'PREVIEW_SOURCE'];
 const PLACEHOLDER_MODEL = 'your-model-name';
 
 /** Pure: KEY=VALUE text -> object. '#' comments, optional quotes, no interpolation. */
@@ -73,6 +74,12 @@ function buildConfig(raw) {
   llm.enabled = !!(url && llm.model);
   if (url) endpointSafety(url, !!llm.apiKey).forEach((p) => problems.push(p));
 
+  // Local preview dashboard only (tools/sheet-source.js): which tab it reads. The bot itself always reads Flights.
+  const previewRaw = get('PREVIEW_SOURCE').toLowerCase();
+  if (previewRaw && previewRaw !== 'flights' && previewRaw !== 'import') {
+    problems.push({ level: 'warn', key: 'PREVIEW_SOURCE', message: 'must be "flights" or "import"; using flights' });
+  }
+
   const config = {
     tgToken: get('TG_BOT_TOKEN'), allowedChatIds: allowed, spreadsheetId: get('GOOGLE_SPREADSHEET_ID'),
     google: { clientId: get('GOOGLE_OAUTH_CLIENT_ID'), clientSecret: get('GOOGLE_OAUTH_CLIENT_SECRET') },
@@ -80,6 +87,7 @@ function buildConfig(raw) {
     stateDir: get('STATE_DIR') || path.join(__dirname, '..', '.state'),
     rateLimitPerMin: intIn(get('RATE_LIMIT_PER_MIN'), 6, 1, 60),
     maxQuestionChars: intIn(get('MAX_QUESTION_CHARS'), 500, 50, 2000),
+    previewSource: previewRaw === 'import' ? 'import' : 'flights',
     pollTimeoutS: 25, snapshotTtlMs: 60 * 1000, maxMessageAgeMin: 30
   };
   return { config, problems };

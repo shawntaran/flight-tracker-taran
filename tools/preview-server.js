@@ -28,16 +28,17 @@ function getGroupingBundle() {
 
 const defaultPort = parseInt(process.env.PORT || '3000', 10);
 
-// Live data for the preview: the "Import" tab, read server-side (see tools/import-source.js). Built lazily so
-// the server still starts, and ?mock=1 still works, without the local assistant's Google setup.
-let importSource = null;
-function getImportData() {
+// Live data for the preview: the tracker's Flights/Groups/Status tabs (PREVIEW_SOURCE=import: the Import tab),
+// read server-side (see tools/sheet-source.js). Built lazily so the server still starts, and ?mock=1 still
+// works, without the local assistant's Google setup. fresh: a click on Refresh skips the 60 s cache.
+let sheetSource = null;
+function getSheetData(fresh) {
   try {
-    importSource = importSource || require('./import-source').createImportSource();
+    sheetSource = sheetSource || require('./sheet-source').createSheetSource();
   } catch (err) {
     return Promise.reject(err);
   }
-  return importSource();
+  return sheetSource({ fresh });
 }
 
 // Operations Assistant: the model from local-assistant/.env.local-assistant (see tools/ops-assistant.js). Lazy for the same reason.
@@ -154,7 +155,7 @@ function handleRequest(req, res) {
   }
 
   if (pathname === '/api/dashboard-data') {
-    getImportData().then((data) => {
+    getSheetData(url.searchParams.get('fresh') === '1').then((data) => {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(data));
     }).catch((err) => {

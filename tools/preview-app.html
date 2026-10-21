@@ -193,6 +193,8 @@
     <div class="flex flex-col min-w-0">
       <span id="page-title" class="font-headline-sm text-headline-sm text-primary leading-tight">Flight Operations</span>
       <span id="page-subtitle" class="font-body-sm text-body-sm text-on-surface-variant hidden sm:inline truncate">Monitor arrivals, departures, and airport transfers</span>
+      <!-- Where this data comes from (always visible): the tracked Flights tab, or Import-tab schedules only -->
+      <span id="data-source-line" class="font-data-mono text-[10px] leading-tight text-on-surface-variant truncate"></span>
     </div>
     <div class="flex items-center gap-space-md">
       <div class="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded bg-surface-container-low border border-outline-variant/40">
@@ -822,7 +824,8 @@
   window.addEventListener('hashchange', function () { navigate(location.hash.slice(1) || 'overview'); });
 
   // ===== DATA =====
-  function load() {
+  /** fresh: a Refresh click asks the server to skip its 60 s cache; the 5-minute auto-refresh does not. */
+  function load(fresh) {
     if (!(window.google && google.script && google.script.run)) {
       return showBanner('This page needs the mock bridge. Make sure mock-bridge.js is loaded.');
     }
@@ -838,7 +841,7 @@
     }).withFailureHandler(function (e) {
       showBanner('Could not load dashboard data: ' + (e && e.message || e));
       $('synced-ago').textContent = 'Sync failed';
-    }).getDashboardData();
+    }).getDashboardData(fresh === true ? { fresh: true } : undefined);
   }
   function showBanner(text) { var b = $('banner'); b.textContent = text; b.classList.toggle('hidden', !text); }
   function renderPage(page) {
@@ -857,6 +860,7 @@
     $$('[data-f="home"]').forEach(function (el) { el.textContent = d.homeAirport || 'BLR'; });
     $('today').textContent = 'Today, ' + dateFmt.format(now);
     $('attribution').textContent = d.attribution;
+    $('data-source-line').textContent = 'Data: ' + (d.preview ? 'mock data (local preview)' : d.source || 'unknown source');
     renderEngine(d);
     refreshAssistantStatus();
   }
@@ -2344,7 +2348,7 @@
   });
   $('nf-search').addEventListener('input', function (e) { state.notif.query = e.target.value.trim(); if (state.data) renderNotificationsPage(); });
   // Refresh buttons (global)
-  $$('[data-refresh]').forEach(function (b) { b.addEventListener('click', load); });
+  $$('[data-refresh]').forEach(function (b) { b.addEventListener('click', function () { load(true); }); });
   // Sidebar nav clicks (prevent default hash jump scroll)
   $$('nav [data-page]').forEach(function (a) {
     a.addEventListener('click', function (e) {
