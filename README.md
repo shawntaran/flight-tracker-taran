@@ -23,6 +23,7 @@ It runs on free tiers: AeroDataBox Basic, OpenSky, Telegram, Gmail and Apps Scri
 | Usage counters and suspension state | Script properties `ADB_USAGE_V1*` | The script. Don't edit them |
 | Faculty flights, cab groups, logs | **Flights**, **Groups**, **Log** and **API Usage** sheets | You (Flights) and the script |
 | Every Telegram message and its delivery state | **Telegram Deliveries** sheet, created on the first message | The script. Read it; don't edit it |
+| When the tracker last ran, whether that run worked, and whether its trigger is installed | **Status** sheet (the heartbeat), created by **1. Set up sheets** | The script, on every run. Read it; don't edit it |
 
 Secrets never go in code, in the sheet, in the manifest, or in git. `.env.example` only lists the secret names; Apps Script does not read `.env` files.
 
@@ -93,7 +94,7 @@ Each step is marked 🖐 if you do it by hand, or ⚙️ if it's automated or a 
 
 9. ⚙️ **Set up the sheets.** Reload the spreadsheet, then choose **Flight Tracker → 1. Set up sheets**. Apps Script asks for permission the first time.
 
-   This creates or updates the Flights, Config, Groups, Log, API Usage and About sheets, and sets the timezone to Asia/Kolkata. On the Config sheet it adds any settings the sheet lacks and refreshes the notes, but **it never changes a value you set**.
+   This creates or updates the Flights, Config, Groups, Log, API Usage, Status and About sheets, and sets the timezone to Asia/Kolkata. On the Config sheet it adds any settings the sheet lacks and refreshes the notes, but **it never changes a value you set**.
 10. 🖐 **Coordinators.**
     1. Each coordinator opens the bot in Telegram (search for its username) and sends `/start`. A bot can't message anyone who hasn't done this, and it can't look people up: they must write to it first. For a group chat, add the bot to the group and send `/start@YourBotName`.
     2. Within 24 hours (Telegram keeps these messages only that long), run **Show Telegram chat ids**. It lists each chat's id, type and name, and marks the ones that are already coordinators. Reading the list doesn't use up or change anything.
@@ -122,12 +123,30 @@ Each step is marked 🖐 if you do it by hand, or ⚙️ if it's automated or a 
 
     This is the only setup step that uses quota.
 14. 🖐 **Add flights.** Add a tab named `Import`, paste the travel-details spreadsheet into it with headers in row 1, and run **3. Import from "Import" tab**. Or type rows straight into **Flights** (see below).
+
+    **Changes after the first import.** The tracker reads only the **Flights** tab. Editing the Import tab changes nothing until you run **3. Import from "Import" tab** again (or make the same edit on Flights directly). A re-import:
+    - adds people and flights that are new;
+    - lists every changed scheduled time or terminal on rows already in Flights, for example "Row F12 Dr X arrival: Sched Arr 2026-10-25 04:50 → 06:10", and asks before writing them. It writes only your green columns; the tracker then re-checks those rows. A blank or unreadable Import value never blanks a Flights cell;
+    - lists a probable flight-number change ("Possible flight change: Dr Y arrival EK568 (row F7, active) vs EK566 in Import"). It adds the new flight but never deactivates the old one: untick **Active** on the old row yourself;
+    - ends with a count of rows added, updated, unchanged and possible flight changes.
 15. ⚙️ **Start tracking** with **4. Start tracking (every 5 min)**. **Stop tracking** removes the trigger.
 
     Run **Check setup** again: it should show one trigger. Then watch:
+    - **Status:** `LAST_TICK_AT` should move every 5 minutes and `LAST_TICK_RESULT` read `ok`. The dashboard, the local preview and the Telegram assistant warn when it is more than 15 minutes old, failed, or the trigger is missing,
     - **Log:** every check and alert,
     - **API Usage:** every AeroDataBox request, with running totals,
     - **Show API usage:** the current window.
+
+### Checking flights on demand
+
+- **Run a check now** runs the tracker once, exactly like the 5-minute trigger: only rows that are *due* are looked up (for example at T-6 h). It then reports what it did: "Check finished at 14:05 IST: 2 provider lookups due, 2 requests made, 1 row updated, 1 alert sent." "0 due" is normal between checkpoints.
+- **Force check a flight now (uses AeroDataBox units)** looks chosen rows up immediately, even if they are not due:
+  1. Enter one or more row IDs from the Flights **ID** column, comma-separated (`F12, F15`).
+  2. Confirm: the dialog shows the rows, the estimated AeroDataBox units (2 per lookup; 0 if a recent answer is cached) and each row's remaining per-flight calls (`MAX_ADB_CALLS_PER_FLIGHT`, default 4).
+  3. A summary shows each row's result and its new status and time.
+
+  Forced lookups use the same budget, cache and per-flight cap as tracking. A row at its cap, already finished (landed, departed, cancelled, diverted), inactive or with an unreadable flight number is refused without a request.
+- If another check is running, both items say **"A check is already running; try again in a minute."** Nothing is queued or skipped silently.
 
 ### Dashboard (optional)
 
@@ -141,6 +160,8 @@ The Overview dashboard is a read-only web page that shows flights, cab groups, a
    - After a code change, choose **Deploy → Manage deployments → Edit → New version**, or the link keeps serving the old code.
 3. **Sharing:** the page runs as you, so anyone you give access to sees faculty names, flights and drivers. Widen access only on purpose, for example **Anyone within your domain** on Workspace.
 4. **Theme:** light by default; the moon icon switches to dark, and the choice is remembered in that browser.
+5. **Freshness:** under the title, "Tracker last ran HH:MM IST (N min ago)" comes from the **Status** sheet. A red banner appears when that is more than 15 minutes ago, the last run failed, or the trigger isn't installed.
+6. **Force check:** each active flight has a **Force check** button. It shows the same confirmation as the menu item and uses the same lock and budget. This is the dashboard's only action that calls a provider, and only after you confirm.
 
 The Flight Assistant panel isn't connected to any AI service yet, so it sends nothing anywhere.
 
@@ -163,7 +184,18 @@ Green columns are yours. Blue columns are written by the script. Hidden `m:` col
 [`local-assistant/`](local-assistant/README.md) is a separate Node.js worker. It answers coordinators' questions in Telegram ("Who is delayed?", "Where is EK568 right now?") from the sheet, read-only, using a language model you choose: local Ollama, a LAN machine, or a university DGX. It runs on a computer you control, not in Apps Script.
 
 - If it stops, every automatic alert still goes out; only the question answering pauses.
+- `/status` shows when the tracker last ran. If that is more than 15 minutes ago, failed, or there is no **Status** sheet, every answer ends with a note such as "Note: the tracker hasn't updated since 14:05 IST; times may be stale."
 - Setup, the DGX notes and the health check are in [local-assistant/README.md](local-assistant/README.md).
+
+## Local preview dashboard (optional)
+
+`npm run preview` serves a richer copy of the dashboard on `http://localhost:3000`. It reads the sheet with the local assistant's read-only Google sign-in, so set up `local-assistant/` first.
+
+- **Same data as the Telegram assistant.** By default (`PREVIEW_SOURCE=flights` in `local-assistant/.env.local-assistant`) it reads the tracker's **Flights**, **Groups**, **Config** and **Status** tabs: live statuses, ETAs, cab groups and the heartbeat. The header shows the source: "Data: Google Sheets · Flights tab (tracked) · Tracker last ran …".
+- **Import fallback.** If the Flights tab is missing or has no rows, the preview shows the Import tab's schedules instead and says so in a banner: "Flights tab empty or missing: showing Import-tab schedules only, no live status". `PREVIEW_SOURCE=import` always shows the Import tab (schedules only, every status SCHEDULED).
+- **Refresh.** The page refreshes itself every 5 minutes from a 1-minute server cache. The refresh buttons read the sheet again at once (at most once every 5 seconds).
+- **Read-only.** The preview can't force a check or change anything: its **Force check** button is disabled. Use the sheet menu or the deployed dashboard.
+- `?mock=1` shows built-in sample data without touching the sheet.
 
 ## Telegram alerts: how delivery works
 
@@ -207,6 +239,8 @@ Green columns are yours. Blue columns are written by the script. Hidden `m:` col
 | Symptom | Fix |
 |---|---|
 | No **Flight Tracker** menu | Reload the sheet. The script must be opened from this sheet's Extensions menu (bound) |
+| Banner "The tracker has not run for …" / Telegram note "the tracker hasn't updated since …" | The trigger stopped or keeps failing. Read `LAST_TICK_ERROR` on **Status** and the **Log**; run **Check setup**, then **4. Start tracking** if the trigger is missing. "No heartbeat" means **1. Set up sheets** and a first run haven't happened yet |
+| Local preview says "showing Import-tab schedules only" | The Flights tab is empty or missing: run **3. Import from "Import" tab** in the sheet. Or check `PREVIEW_SOURCE` in `local-assistant/.env.local-assistant` |
 | "Authorization required" | Run any menu item and approve. The scopes are in `src/appsscript.json` |
 | Check setup: ❌ Document lock | The script is standalone, not bound. Recreate it from the sheet (step 4) |
 | Check setup: ❌ `ADB_KEY` / `TG_BOT_TOKEN` | Add the property with the exact name (step 6). ⚠️ "spaces" or "does not look like" means re-paste the value |

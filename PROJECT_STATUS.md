@@ -1,6 +1,6 @@
 # PROJECT_STATUS: Faculty Flight Tracker
 
-*Handoff document for people and AI agents. Last updated: 2026-10-21 (status refresh: git state, assistant test count, repo map; §8, §11, §14): hardening pass, then the Flight Tracking, UI Design and Telegram Bot Setup workstreams (§14).*
+*Handoff document for people and AI agents. Last updated: 2026-10-22 (single source of truth, force check, heartbeat, import sync, on branch `fix/single-source-heartbeat`; §2, §3, §4, §8, §9, §11, §14). Earlier: the hardening pass, then the Flight Tracking, UI Design and Telegram Bot Setup workstreams (§14).*
 
 **Treat this as a map, not as proof.** Check the code before relying on any claim here, and update this file when you finish a task.
 
@@ -33,10 +33,11 @@ It was requested via Siva sir. The source data is the "ITW Faculty Travel Detail
 All files in `src/` share one global scope, as Apps Script requires. Every top-level statement only uses definitions from its own file, so the order files load in doesn't matter. `npm run doctor` checks this by loading each file alone in an empty sandbox.
 
 ```
- time trigger (5 min)            spreadsheet menu (Menu.js, Diagnostics.js)
-        │                                 │
-        ▼                                 ▼
- Tracker.tick() ── LockService script lock ──► Tracker.runTick_()
+ time trigger (5 min)            spreadsheet menu (Menu.js, Diagnostics.js), dashboard Force check (Dashboard.js)
+        │                                 │  runCheckNow() / forceCheckFlight() / forceCheckFromDashboard():
+        ▼                                 ▼  busy lock -> visible message, never silent
+ Tracker.tick() ── LockService script lock ──► Tracker.runTick_(now, {forceIds}) -> {lookupsDue, lookupsMade, rowsUpdated,
+                                                                                     alertsQueued, forced[]}
         │
         ├─ Sheet.readFlights() → Tracker.prepareRow()      (normalise inputs, reset state on edits)
         ├─ Tracker.purgeExpiredProviderData(), Sheet.purgeOldLogs_()   (7-day retention)
@@ -52,6 +53,24 @@ All files in `src/` share one global scope, as Apps Script requires. Every top-l
         └─ Alerts.Outbox.flush() → repeat filter → Gmail (MailApp) + Alerts.tgDeliver_()
                 tgDeliver_: "Telegram Deliveries" sheet (QUEUED → SENT / RETRY / FAILED / UNCONFIRMED / EXPIRED),
                             due retries first, then new messages; attribution on every part
+        └─ Sheet.recordHeartbeat_() → Status tab, one setValues (also written by tick()'s catch, as an error)
+```
+
+**Who reads and writes which tab** (one source of truth: the tracker writes, everything else reads the same tabs):
+
+```
+ Import tab ──(menu 3. Import, re-runs list and apply changes)──► Flights tab (green input columns only)
+                                                                      │
+ runTick_ (Apps Script) ── reads Flights, Config ── writes Flights (out + m: columns), Groups, Log, API Usage,
+                                                     Telegram Deliveries, Status (heartbeat)
+                                                                      │
+          ┌───────────────────────────────┬───────────────────────────┴──────────────────────────────┐
+          ▼                               ▼                                                          ▼
+ Dashboard web app (Dashboard.js)  Local preview (tools/sheet-source.js;          Telegram assistant (local-assistant/
+ reads Flights, Groups, Config,    PREVIEW_SOURCE=flights, the default):          snapshot.js) reads Flights, Groups,
+ Log, Status; API usage            reads Flights, Groups, Config, Status.          Config, Status. Read-only token.
+                                   Falls back to the Import tab (schedules only)
+                                   with a visible note when Flights is empty.
 ```
 
 **Flight lifecycle** (`Tracker.js`, `nextCheckTime`).
@@ -117,21 +136,31 @@ All files in `src/` share one global scope, as Apps Script requires. Every top-l
 │   │                      sheet store), chat-id validation, chat-id listing, "Check Telegram bot", test alert
 │   ├── Config.js          DEFAULTS (Config sheet), SECRETS registry, secret(), secret status, redaction,
 │   │                      config merge/validation, Config-sheet migration planner
-│   ├── Sheet.js           Sheet schema (COLS), setupSheets, read/write Flights and Groups, Log, API Usage, About
+│   ├── Sheet.js           Sheet schema (COLS), setupSheets, read/write Flights and Groups, Log, API Usage, About,
+│   │                      Status tab heartbeat (recordHeartbeat_, readHeartbeat_)
 │   ├── Diagnostics.js     Check setup (no API calls) and Test a flight lookup (one budgeted request)
-│   ├── Menu.js            onOpen menu, triggers, cab-plan send, usage/sync/resume dialogs, Excel import
+│   ├── Menu.js            onOpen menu, triggers, Run a check now, Force check, cab-plan send, usage/sync/resume
+│   │                      dialogs, Excel import with change detection (planImportChanges_)
 │   └── Util.js            IST/UTC helpers, flight-number normalisation, airline table, haversine
-├── local-assistant/       Optional Telegram assistant worker (Node 18+, no dependencies; §14)
+├── local-assistant/       Optional Telegram assistant worker (Node 18+, no dependencies; §14). Its config also holds
+│                          PREVIEW_SOURCE for the local preview
 ├── test/                  Node tests; real src in a vm sandbox, all external services faked
 │   ├── run-tests.js       Core: normalisation, time, parsing, ETA, grouping, lifecycle, one runTick_ test
 │   ├── adb-tests.js       AeroDataBox budget: limits, tiers, failures, dedupe, window, migration, D1–D5
 │   ├── setup-tests.js     Secrets, redaction, config merge/migration, setup report, resume guard, hygiene
 │   ├── dashboard-tests.js Dashboard data contract, read-only guarantee, personal-data minimisation, page layout
-│   └── telegram-tests.js  Telegram delivery: success, token/chat errors, 429/5xx/timeout, retries, expiry, repeats,
-│                          splitting, redaction, crash safety, Deliveries sheet store, diagnostics, email regressions
+│   ├── telegram-tests.js  Telegram delivery: success, token/chat errors, 429/5xx/timeout, retries, expiry, repeats,
+│   │                      splitting, redaction, crash safety, Deliveries sheet store, diagnostics, email regressions
+│   ├── sheet-source-tests.js  Preview data source: header mapping, machine-column times, final rule, allowlist,
+│   │                      Import fallback, cache bypass, same delayed flights as the Telegram assistant
+│   └── (preview suites)   flight-sort, flight-position, cab-suggestions, smart-dispatch, guest-view
 └── tools/
-    └── doctor.js          `npm run doctor`: offline checks (files, manifest, file load order, secret names,
-                           .gitignore, secrets scan) plus all test suites
+    ├── doctor.js          `npm run doctor`: offline checks (files, manifest, file load order, secret names,
+    │                      .gitignore, secrets scan) plus every test suite listed in `npm test`
+    ├── preview-server.js  `npm run preview`: local preview (preview-app.html, mock-bridge.js, ops-assistant.js, …)
+    ├── sheet-source.js    Preview data: Flights/Groups/Config/Status tabs -> the getDashboardData contract
+    │                      (+ source, lastTick); Import fallback; 60 s cache, ?fresh=1 bypass
+    └── import-source.js   Import-tab mapping (schedules only), used by sheet-source.js for the fallback
 ```
 
 Not in the repository, deliberately: `.clasp.json` (yours), `.env` (optional, personal), and the travel-details `.xlsx`, which contains personal data.
@@ -155,6 +184,12 @@ Not in the repository, deliberately: `.clasp.json` (yours), `.env` (optional, pe
 - The Config-sheet migration planner, the setup report logic and the lookup summary.
 - `.gitignore` rules (checked with git by `npm run doctor`).
 - The Overview dashboard's data contract (`buildDashboardData_`), its read-only behaviour and its page layout (§14). The page was also checked in a local browser preview with a stand-in for `google.script.run`.
+- **2026-10-22, single source of truth and freshness** (§14 "Single source of truth, force check, heartbeat, import sync"):
+  - The local preview reads the tracked Flights/Groups/Config/Status tabs (`tools/sheet-source.js`), with the visible Import fallback, the `?fresh=1` cache bypass and the personal-data allowlist. Checked in the preview browser with fixture tabs: a DELAYED row shows as delayed, and the Operations Assistant (local model) named it. The Telegram `/delayed` answer names the same flight (test).
+  - `runTick_(now, {forceIds})`: forced lookups through `fetchFlightInfo` and the per-flight cap, refusals, per-run counters; the normal path is unchanged (test).
+  - The menu items "Run a check now" (`runCheckNow`) and "Force check a flight now" (`forceCheckFlight`), with fake UI and lock: confirmation text, busy-lock message, summaries.
+  - The heartbeat: Status rows written once per run, the error heartbeat (redacted, max 200 chars), Status-write failure isolation, `lastTick` in the dashboard contract, warnings in both pages (checked in the preview browser), and the Telegram note on stale, missing or failed heartbeats.
+  - Import change detection (`planImportChanges_`) and `importTravelDetails` writing only input cells (fake spreadsheet).
 - Telegram delivery (§14 "Telegram Bot Setup"), with every Telegram answer faked:
   - classification of 200/400/401/403/404/429/5xx/network/unreadable answers,
   - bounded retries, `retry_after`, expiry, the per-run time budget, stop-on-bad-token,
@@ -164,6 +199,7 @@ Not in the repository, deliberately: `.clasp.json` (yours), `.env` (optional, pe
 
 **Implemented, not verified in a real environment:**
 - The dashboard web app: `doGet`, `getDashboardData` reading the bound sheet from a web-app request, `openDashboard`, and the page inside Apps Script's HtmlService frame.
+- **2026-10-22 work, implemented, not verified live:** the Status tab in a real spreadsheet (creation by `setupSheets`, the text format on column B, one write per run), the real menu prompts and alerts of Run a check now / Force check / the import dialog, the dashboard's Force check button (`forceCheckPlanFromDashboard` → `confirm()` → `forceCheckFromDashboard`), and the local preview and Telegram assistant reading a real Status tab.
 - Everything that touches Google services: `setupSheets`, `readFlights`/`writeFlights`, `appendUsageRow_`, `purgeOldLogs_`, menus and dialogs, triggers, `collectSetupFacts_`, `runSetupCheck`, `testFlightLookup`, `importTravelDetails`, `importOpenFlightsAirlines`.
 - The real `LockService.getDocumentLock()` in a time-driven trigger, and PropertiesService consistency between executions.
 - Real AeroDataBox, OpenSky, FlightAware, Telegram and Gmail traffic. The response shapes come from the providers' documentation.
@@ -171,7 +207,7 @@ Not in the repository, deliberately: `.clasp.json` (yours), `.env` (optional, pe
 - The clasp deployment path; clasp isn't installed in the build environment.
 
 **Partially implemented:**
-- **Departure rows** get only the T-6 h check. Later delays aren't followed.
+- **Departure rows** get only the T-6 h check, and arrivals have no check between T-6 h and departure + 10 min. Later delays aren't followed (proposal `PRE_DEP_RECHECK_H` in §14, not implemented). "Force check a flight now" covers it by hand.
 - **First-leg connection check:** right-leg selection, bounded retries, overnight previous-date lookup and a visible "not checked" outcome are now implemented and tested with fakes (§14). It has not been verified against real multi-leg provider responses.
 - **Seat capacity** is one size for every cab (`MAX_SEATS`).
 
@@ -330,20 +366,23 @@ npm test
 npm run doctor
 ```
 
-**Latest run** (2026-10-21, Node v25.8.1, Windows; `npm test` exit 0, `npm run doctor` no errors, no warnings):
+**Latest run** (2026-10-22, Node v25.8.1, Windows, branch `fix/single-source-heartbeat`; `npm test` exit 0; `npm run doctor`: 0 errors, 0 warnings, every suite run):
 
 | Suite | Result |
 |---|---|
-| `test/run-tests.js` | 57 passed, 0 failed (Flight Tracking: 9 first-leg tests, then 25 provider-hardening tests) |
-| `local-assistant/test/assistant-tests.js` | 24 passed, 0 failed (in `npm test` and the doctor) |
+| `test/run-tests.js` | 76 passed, 0 failed (+19 on 2026-10-22: force check, Run a check now, heartbeat, import changes) |
 | `test/adb-tests.js` | 49 passed, 0 failed |
-| `test/setup-tests.js` | 20 passed, 0 failed (1 doctor-isolation test added by Flight Tracking) |
-| `test/dashboard-tests.js` | 15 passed, 0 failed (new, UI Design) |
-| `test/telegram-tests.js` | 34 passed, 0 failed (new, Telegram Bot Setup) |
-| `test/flight-sort-tests.js` | 18 passed, 0 failed (in `npm test`; not run by the doctor) |
-| `test/flight-position-tests.js` | 8 passed, 0 failed (in `npm test`; not run by the doctor) |
-| `test/cab-suggestions-tests.js` | 7 passed, 0 failed (in `npm test`; not run by the doctor) |
-| `npm run doctor` | 0 errors, 0 warnings (clasp 3.4.1 installed, `.clasp.json` present). 25 expected files, 5 suites. Latest run: 2026-10-20, after the Flight Tracking provider hardening |
+| `test/setup-tests.js` | 20 passed, 0 failed |
+| `test/dashboard-tests.js` | 16 passed, 0 failed (+1: `lastTick` contract and page warnings) |
+| `test/telegram-tests.js` | 34 passed, 0 failed |
+| `test/flight-sort-tests.js` | 18 passed, 0 failed |
+| `test/flight-position-tests.js` | 8 passed, 0 failed |
+| `test/cab-suggestions-tests.js` | 7 passed, 0 failed |
+| `test/smart-dispatch-tests.js` | 12 passed, 0 failed (unchanged; owner's suite) |
+| `test/guest-view-tests.js` | 8 passed, 0 failed |
+| `test/sheet-source-tests.js` | 16 passed, 0 failed (new) |
+| `local-assistant/test/assistant-tests.js` | 30 passed, 0 failed (+6: heartbeat notes, `/status`, model context) |
+| `npm run doctor` | 0 errors, 0 warnings. It now runs all 12 suites (before: 6). It can take over 2 minutes on this machine |
 
 **What the tests do establish:**
 - The logic of every pure function listed in §4.
@@ -388,6 +427,12 @@ npm run doctor
 | Low | Anyone with edit access to the sheet can add a Telegram recipient (Config, Groups, Flights) | That is the trust model: share edit access only with coordinators. Check setup and "Check Telegram bot" show every configured chat and flag groups and public chats |
 | Low | A wrong coordinator chat id fails again for each new alert (one request each), until fixed | Visible as FAILED rows, in Log and in Check setup; no retry storm |
 | Low | Telegram sending runs inside the tick's script lock (up to about 20 s, plus at most one 3 s wait) | Another menu action may wait. Moving sends outside the lock needs a Tracker.js change |
+| High: verify live | The Status tab, the new menu dialogs, the import change dialog and the dashboard Force check button have only run against fakes | Wrong behaviour shows up on the first real run. Owner checklist in §14 |
+| Medium | Force check spends AeroDataBox units on demand (2 per lookup) | A coordinator can use budget faster than the schedule would. Limited by the confirmation, at most 10 rows per run, the per-flight cap and the gateway budget; the dashboard button is owner-only |
+| Low | "Run a check now" counts alerts before the 120-min repeat filter, so "alerts sent" can include a repeat that was then suppressed | The message says so ("Repeated identical alerts … are not sent twice"). Exact delivery is on Telegram Deliveries |
+| Low | The heartbeat warning fires after 15 min without a run. Apps Script triggers can start late | An occasional false "may be stale" warning; three missed ticks in a row are needed |
+| Low | Applying import changes writes input cells without the script lock | A tick running at that moment keeps the old values until its next run, then resets those rows through `stateKey` as designed |
+| Low | The heartbeat age is computed with the viewer's clock (browser, assistant host) | A machine whose clock is far off misjudges staleness |
 | Medium: known gap | Smart Cab Plan overrides live only in the preview browser's memory (`CabSuggestions.applyOverride`). `tick()`, the Groups tab, driver notifications and Telegram `/cabs` never see them, and a page reload drops them | A coordinator can see an AI-adjusted cab on the preview while drivers and the bot work from the rule-based plan. Design note in §14 "Override gap"; nothing implemented |
 
 ## 10. Decisions and rationale
@@ -422,6 +467,7 @@ This conversation built the project, then audited and hardened it in passes.
 - **Later, Flight Tracking workstream:** provider hardening: attempt accounting, flight identity, first-leg retries, terminal/gate freshness, parser resilience and the doctor `.gitignore` checker. Files: `src/Providers.js`, `src/Tracker.js`, `tools/doctor.js`, `test/run-tests.js`, `test/setup-tests.js`, `README.md` (2 troubleshooting rows); details in §14.
 - **Later, Telegram Bot Setup workstream: local Telegram assistant** (`local-assistant/`). A separate Node.js worker answers coordinators' questions from the sheet, read-only, through any OpenAI-compatible model endpoint. Details in §14 "Local Telegram assistant".
 - **Later, Telegram Bot Setup workstream:** delivery tracking, retries, the repeat filter, splitting, chat-id validation and Telegram diagnostics. Files: `src/Alerts.js`, small edits to `src/Diagnostics.js` and `src/Menu.js`, new `test/telegram-tests.js`, test-harness stubs in `test/run-tests.js`, `test/adb-tests.js` and `test/setup-tests.js`, one-line edits to `package.json` and `tools/doctor.js`, the README Telegram sections and this file. Details in §14.
+- **2026-10-22, branch `fix/single-source-heartbeat`** (5 commits, not pushed): single source of truth for the preview, force check, honest "Run a check now", the Status-tab heartbeat, import change propagation, and the override-gap note. Details and the interfaces in §14 "Single source of truth, force check, heartbeat, import sync".
 - **Later, UI Design workstream:** Overview dashboard web app. New files: `src/Dashboard.js`, `src/DashboardPage.html`, `test/dashboard-tests.js`. One-line edits: `src/Menu.js`, `package.json`, `tools/doctor.js`. Also `src/appsscript.json` (`webapp` section), a README section and this file. Details in §14.
 
 Files changed **in this hardening pass**:
@@ -703,3 +749,54 @@ Three Claude Code sessions share this working folder. They are not in separate g
   - a row whose flights no longer fit (the same check as `applyOverride`) is skipped and reported, never forced.
 - **Writes go through Apps Script only** (a menu item or the owner-only web app). The local assistant and the local preview stay read-only (`spreadsheets.readonly`, GET only); they can show overrides but must never write them.
 - This is a schema and architecture decision for the owner. The Smart Cab Plan code (`tools/smart-dispatch.js`, `CabSuggestions.applyOverride`, its UI and tests) is the owner's and was not changed.
+
+**Single source of truth, force check, heartbeat, import sync** (2026-10-22, branch `fix/single-source-heartbeat`; tested with fakes and in the preview browser; nothing touching real Google services is verified live):
+- **Part 1, preview data.** `tools/sheet-source.js` replaces the Import-tab source in `preview-server.js`.
+  - It returns the `buildDashboardData_` shape plus `source` and `lastTick`.
+  - Columns are found by header name; times come from the `m:` columns, falling back to the IST input columns; `final` follows `Tracker.isFinal`.
+  - Phone, Email, Telegram Chat ID, Notes, Driver Telegram Chat ID and Member IDs are never read into the payload; Last Error is redacted.
+  - A missing or empty Flights tab falls back to Import with the error "Flights tab empty or missing: showing Import-tab schedules only, no live status".
+  - `PREVIEW_SOURCE=flights|import` is a new key in `local-assistant/src/config.js`.
+  - The Refresh buttons call `getDashboardData({fresh: true})` → `/api/dashboard-data?fresh=1` (one real read per 5 s); the auto-refresh keeps the 60 s cache.
+  - `assistantOverview()` needed no change: real statuses or ETAs make `liveStatusAvailable` true.
+- **Part 2, force check.**
+  - `runTick_(now, {forceIds})` returns `{at, lookupsDue, lookupsMade, rowsUpdated, alertsQueued, forced[]}`. Each `forced[]` entry is `{id, flight, name, outcome, status, eta, source, error, callsUsed, callsLeft}`, where outcome is `checked|cap|final|inactive|invalid|blocked|failed`.
+  - Menu items: "Run a check now" (`runCheckNow`) and "Force check a flight now" (`forceCheckFlight`); the trigger handler is still `tick()`.
+  - The dashboard has a Force check button via `forceCheckPlanFromDashboard` and `forceCheckFromDashboard`; it is disabled in the preview.
+- **Part 3, heartbeat.**
+  - The Status tab holds `LAST_TICK_AT` (UTC ISO), `LAST_TICK_RESULT` (ok/error), `LAST_TICK_ERROR`, `LAST_TICK_LOOKUPS`, `TRIGGER_INSTALLED` (yes/no) and `TRACKER_VERSION`, at fixed rows 2-7, written by one `setValues` per run.
+  - Dashboard contract: `lastTick: {at, result, error, triggerInstalled} | null`.
+  - Telegram snapshot: `snap.lastTick` (+ `ageMin`, `stale`) and `snap.heartbeatProblem`, which is added first to `problems` when the Status tab was read.
+- **Part 4, import.** `planImportChanges_(existingRows, incoming)` and `describeImportChanges_(plan)` (Menu.js). Only `schedArrIn`, `schedDepIn` and `terminal` are ever written to existing rows, and only after a YES.
+- **Interfaces other workstreams must know:**
+  - Flight Tracking owns `Tracker.js`: `runTick_` now returns a summary and writes the heartbeat; the forced path is the only new branch.
+  - **New tab `Status`.** Don't rename its keys: the dashboard, the preview and the assistant read them.
+  - `buildDashboardData_` gained `lastTick`.
+  - The assistant's `SYSTEM_PROMPT` gained rule 9 (stale data first).
+  - The doctor now runs all 12 suites.
+- **Not done, by design:**
+  - nothing in `tools/smart-dispatch.js`, `CabSuggestions.applyOverride`, the override UI or `test/smart-dispatch-tests.js`;
+  - no write path in the local assistant;
+  - no change to budgets, caps, dedupe or the cache.
+- **Owner's live checklist:** see the final report of this change. In short:
+  - "Set up sheets" creates Status;
+  - a tick updates the heartbeat;
+  - Force check on one row makes one API Usage row;
+  - a busy lock shows the message;
+  - an Import time change is detected and applied;
+  - the preview shows "Flights tab (tracked)";
+  - Telegram `/status` shows the last run, and a stale note appears 15+ min after "Stop tracking".
+
+**Proposal, not implemented: `PRE_DEP_RECHECK_H`** (owner decision):
+- **Gap.** After the T-6 h check, an arrival's next check is departure + 10 min, so a delay announced between T-6 h and departure is caught only after the original departure time (unless OpenSky sees the aircraft). Departures from BLR get only the T-6 h check.
+- **Proposal.** A Config key `PRE_DEP_RECHECK_H`, blank by default (off). Set to 2, it adds one check at scheduled (or revised) departure − 2 h, for arrivals and departures whose status is not yet DEPARTED.
+  - It is skipped when OpenSky already has a fresh airborne fix.
+  - It is skipped when it would use the row's last allowed call. The arrival's landing fallback keeps that call, the same rule as first-leg checks.
+- **Cost.** One Tier-2 lookup = 2 units per flight that reaches T-2 h undeparted.
+  - The 16 rows the preview showed from the live Import tab on 2026-10-21 (13 arrivals, 3 departures) cost at most +32 units for this event.
+  - Those rows today: about 58-110 units (arrivals 4-8 each with no Sched Dep from the Import tab, departures 2). With the recheck: about 90-142 units. That is against `ADB_PLAN` 400 units (about 365 per 30 days in rolling mode) and 1,600 requests (about 45-71 used; never binding).
+  - Over a month at the README's typical 4-6 units per visit (arrival + departure), a visit becomes 8-10 units. Rolling-mode capacity drops from about 60-90 to about 36-45 visits.
+- **Per-flight cap (`MAX_ADB_CALLS_PER_FLIGHT` = 4).** An arrival's worst case today is already 4 calls: learn departure at −24 h, T-6 h, takeoff confirmation, landing fallback.
+  - With the "never the last call" rule, the recheck happens only when at most 2 calls are used by T-2 h. So it is skipped exactly for the rows that also needed the −24 h lookup and a retry.
+  - Departures use at most 2 calls (T-6 h, T-2 h).
+  - Raising the cap to 5 would allow the recheck everywhere, but raises the worst case to 10 units per arrival.
