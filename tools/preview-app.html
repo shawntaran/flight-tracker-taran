@@ -564,6 +564,24 @@
       </div>
       <section id="cs-alerts" class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md" aria-label="Transport-relevant changes"></section>
       <div id="cs-summary" class="px-1 font-data-mono text-data-mono text-on-surface-variant" aria-live="polite"></div>
+      <!-- Smart Cab Plan: the local model reviews the rule-based cabs below with the current flight times (tools/smart-dispatch.js) -->
+      <section aria-label="Smart Cab Plan" class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md flex flex-col gap-space-sm">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm">
+          <div class="flex items-start gap-2 min-w-0">
+            <span class="w-8 h-8 shrink-0 rounded-lg bg-primary text-on-primary flex items-center justify-center"><span class="material-symbols-outlined text-[18px]">auto_fix_high</span></span>
+            <div class="flex flex-col min-w-0">
+              <h2 class="font-headline-sm text-headline-sm text-primary tracking-tight">Smart Cab Plan</h2>
+              <p class="font-body-sm text-[12.5px] text-on-surface-variant">The AI reviews these cabs against the current arrival times and suggests merges, cross-terminal pickups and delay handling. You approve each change.</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button id="smart-reset" type="button" class="hidden h-9 px-3 rounded-lg bg-surface-container-low text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors font-label-md text-label-md whitespace-nowrap" title="Undo every applied override and return to the rule-based plan">Reset overrides (<span id="smart-count">0</span>)</button>
+            <button id="smart-plan-btn" type="button" class="h-9 px-3.5 rounded-lg bg-primary text-on-primary hover:opacity-90 disabled:opacity-50 transition-opacity font-label-md text-label-md font-semibold flex items-center gap-1.5 shadow-sm whitespace-nowrap"><span class="material-symbols-outlined text-[18px]">auto_fix_high</span><span id="smart-plan-label">Generate Smart Cab Plan</span></button>
+          </div>
+        </div>
+        <p id="smart-status" class="hidden" aria-live="polite"></p>
+        <div id="smart-results" class="grid grid-cols-1 md:grid-cols-2 gap-space-md empty:hidden"></div>
+      </section>
       <section aria-label="Shared cab suggestions" class="flex flex-col gap-space-xs">
         <h2 class="px-1 font-label-sm text-label-sm uppercase tracking-wider font-bold text-on-surface-variant">Could share a cab</h2>
         <div id="cs-shared" class="grid grid-cols-1 md:grid-cols-2 gap-space-md"></div>
@@ -690,10 +708,6 @@
             </div>
           </div>
           <button id="assistant-close" class="p-1 text-on-surface-variant hover:text-on-surface rounded hover:bg-surface-container transition-colors" title="Minimize assistant" type="button"><span class="material-symbols-outlined text-[16px]">close</span></button>
-        </div>
-        <div class="px-3 py-2 border-b border-outline-variant/20 flex items-center gap-2">
-          <button id="smart-plan-btn" type="button" class="flex-1 h-8 px-3 rounded-lg bg-secondary text-on-secondary hover:opacity-90 disabled:opacity-50 transition-opacity font-label-md text-[12px] font-semibold flex items-center justify-center gap-1.5" title="Ask the model to review the rule-based cab plan for merges and delay handling"><span class="material-symbols-outlined text-[16px]">auto_fix_high</span>Generate Smart Cab Plan</button>
-          <button id="smart-reset" type="button" class="hidden h-8 px-2.5 rounded-lg bg-surface-container-low text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors font-label-md text-[11px] whitespace-nowrap" title="Undo every applied override and return to the rule-based plan">Reset overrides (<span id="smart-count">0</span>)</button>
         </div>
         <div id="assistant-thread" class="p-4 flex flex-col gap-3 max-h-[380px] overflow-y-auto" aria-live="polite">
           <div class="p-3 rounded-lg bg-surface-container-low/60 border border-outline-variant/10 text-on-surface font-body-sm text-body-sm leading-relaxed">Hello. How can I assist with today's arrivals or cab schedules?</div>
@@ -900,7 +914,7 @@
     (state.cabOverrides || []).forEach(function (sg) {
       var r = CabSuggestions.applyOverride(cm, sg, { nowMs: now, maxStretchMin: window.SmartDispatch ? SmartDispatch.MAX_STRETCH_MIN : null });
       if (r.ok) { cm = r.model; kept.push(sg); }
-      else bubble('An applied cab override no longer fits the latest flight times and was undone: ' + r.error + '.', 'error');
+      else smartStatus('An applied override no longer fits the latest flight times and was undone: ' + r.error + '.', 'error');
     });
     state.cabOverrides = kept;
     if (typeof updateSmartToolbar === 'function') updateSmartToolbar();
@@ -2104,7 +2118,7 @@
     askAssistant(q);
   });
 
-  // ===== SMART CAB PLAN =====
+  // ===== SMART CAB PLAN (Cab Suggestions page) =====
   // The model reviews the rule-based plan (planGroups) with the raw flight times and proposes overrides
   // (tools/smart-dispatch.js builds the data, the server holds the prompt, the page checks every answer).
   // Apply Override changes the in-memory cab model only: nothing is booked, sent or saved.
@@ -2122,7 +2136,12 @@
   function setSmartBusy(busy) {
     smart.busy = busy;
     $('smart-plan-btn').disabled = busy;
-    setBusy(busy);
+    $('smart-plan-label').textContent = busy ? 'Reviewing cabs…' : 'Generate Smart Cab Plan';
+  }
+  function smartStatus(text, kind) {
+    var el = $('smart-status');
+    el.textContent = text || '';
+    el.className = text ? 'font-body-sm text-[12.5px] ' + (kind === 'error' ? 'text-error' : 'text-on-surface-variant') : 'hidden';
   }
   /** The plan to review: planGroups() itself, or the current cabs as the same shape once overrides are applied. */
   function planForReview(cm) {
@@ -2141,49 +2160,43 @@
   }
 
   function generateSmartPlan() {
-    if (smart.busy || chat.busy) return;
-    setAssistantOpen(true);
-    bubble('Generate Smart Cab Plan', 'user');
-    if (!state.data) { bubble('Flight data has not loaded yet. Try again in a moment.', 'error'); return; }
-    if (!window.SmartDispatch || !(google.script.run && google.script.run.smartDispatch)) { bubble('Smart Cab Plan is unavailable on this page.', 'error'); return; }
+    if (smart.busy) return;
+    if (!state.data) return smartStatus('Flight data has not loaded yet. Try again in a moment.', 'error');
+    if (!window.SmartDispatch || !(google.script.run && google.script.run.smartDispatch)) return smartStatus('Smart Cab Plan is unavailable on this page.', 'error');
     var cm = cabModel(), now = state.data.generatedAt;
-    if (cm.error) { bubble(cm.error, 'error'); return; }
+    if (cm.error) return smartStatus(cm.error, 'error');
     var groups = planForReview(cm).filter(function (g) { return g.pickupMs >= now; });
-    if (!groups.length) { bubble('There are no upcoming arrival pickups to review.', 'assistant'); return; }
+    if (!groups.length) return smartStatus('There are no upcoming arrival pickups to review.');
     var C = window.FTGrouping.defaultConfig();
     if (state.data.maxSeats) C.MAX_SEATS = state.data.maxSeats;
     var ctx = SmartDispatch.buildInput(groups, state.data.flights, { config: C, nowMs: now, fs: FS, labels: cabLabels(cm) });
-    var typing = typingBubble();
     setSmartBusy(true);
+    smartStatus('The AI is reviewing ' + groups.length + ' upcoming ' + (groups.length === 1 ? 'cab' : 'cabs') + ' against the current arrival times. This can take up to a minute.');
     google.script.run.withSuccessHandler(function (r) {
-      typing.remove(); setSmartBusy(false);
+      setSmartBusy(false);
       var res = SmartDispatch.parse(r && r.text, ctx.index);
-      if (res.error) bubble('The model\'s answer could not be used (' + res.error + '). Try again.', 'error');
+      if (res.error) smartStatus('The AI\'s answer could not be used (' + res.error + '). Try again.', 'error');
       else renderSmartRun(res, ctx.index, groups.length);
     }).withFailureHandler(function (e) {
-      typing.remove(); setSmartBusy(false);
-      bubble('Smart Cab Plan failed: ' + (e && e.message || e) + '. Check that Ollama is running (npm run assistant:health).', 'error');
-      chat.statusAt = 0; refreshAssistantStatus();
+      setSmartBusy(false);
+      smartStatus('Smart Cab Plan failed: ' + (e && e.message || e) + '. Check that Ollama is running (npm run assistant:health).', 'error');
     }).smartDispatch(ctx.input);
   }
 
+  /** Shows one review's suggestions on the page, replacing the previous review's cards. */
   function renderSmartRun(res, index, cabCount) {
-    var run = ++smart.runs;
-    var wrap = document.createElement('div');
-    wrap.className = 'flex flex-col gap-2';
-    var n = res.suggestions.length;
-    var head = '<div class="px-0.5 flex items-center justify-between"><span class="font-label-sm text-[10px] uppercase tracking-wider text-on-surface-variant font-semibold">Smart Suggestions · ' + n + '</span>' +
-      '<span class="font-data-mono text-[10px] text-on-surface-variant">' + cabCount + ' cabs reviewed</span></div>';
-    var body = n ? res.suggestions.map(function (sg) {
+    var run = ++smart.runs, n = res.suggestions.length;
+    smart.items = {};
+    $('smart-results').innerHTML = res.suggestions.map(function (sg) {
       var uid = 'r' + run + '-' + sg.id;
       smart.items[uid] = { sg: sg, index: index, status: null, error: '' };
       return smartCard(uid);
-    }).join('') : '<div class="p-3 rounded-lg bg-surface-container-low/60 border border-outline-variant/10 font-body-sm text-[12px] text-on-surface">The model found nothing worth changing: the rule-based plan stands.</div>';
-    var dropped = res.rejected.length ? '<p class="px-0.5 font-body-sm text-[11px] text-on-surface-variant" title="' + esc(res.rejected.map(function (x) { return x.action + ': ' + x.reason; }).join('\n')) + '">' +
-      res.rejected.length + ' more ' + (res.rejected.length === 1 ? 'suggestion was' : 'suggestions were') + ' discarded for breaking the limits (' + esc(res.rejected[0].reason) + (res.rejected.length > 1 ? ', …' : '') + ').</p>' : '';
-    wrap.innerHTML = head + body + dropped + '<p class="px-0.5 font-label-sm text-[10px] uppercase tracking-wider text-on-surface-variant/80">' + SUGGEST_NOTE + '</p>';
-    $('assistant-thread').appendChild(wrap);
-    scrollThread();
+    }).join('');
+    var dropped = res.rejected.length ? ' ' + res.rejected.length + ' more ' + (res.rejected.length === 1 ? 'suggestion was' : 'suggestions were') +
+      ' discarded for breaking the limits (' + res.rejected[0].reason + (res.rejected.length > 1 ? ', …' : '') + ').' : '';
+    smartStatus((n ? n + (n === 1 ? ' suggestion' : ' suggestions') + ' for ' + cabCount + ' upcoming cabs. Apply the ones you agree with; the cabs below update.'
+      : 'The AI reviewed ' + cabCount + ' upcoming cabs and found nothing worth changing: the plan below stands.') + dropped);
+    $('smart-status').title = res.rejected.map(function (x) { return x.action + ': ' + x.reason; }).join('\n');
   }
 
   function smartGuest(index, id) {
@@ -2214,7 +2227,7 @@
       : (it.error ? '<span class="text-error font-body-sm text-[11px] flex-1">' + esc(it.error) + '</span>' : '<span class="flex-1"></span>') +
         '<button type="button" data-smart-dismiss="' + uid + '" class="h-7 px-2.5 rounded-lg text-on-surface-variant hover:bg-surface-container font-label-md text-[11px]">Dismiss</button>' +
         '<button type="button" data-smart-apply="' + uid + '" class="h-7 px-2.5 rounded-lg bg-primary text-on-primary hover:opacity-90 font-label-md text-[11px] font-semibold flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">done</span>Apply Override</button>';
-    return '<article data-smart-card="' + uid + '" class="p-3 rounded-lg bg-surface-container-lowest border border-outline-variant/30 shadow-sm flex flex-col gap-2' + (it.status === 'dismissed' || it.status === 'stale' ? ' opacity-60' : '') + '">' +
+    return '<article data-smart-card="' + uid + '" class="p-3 rounded-lg bg-surface-container-low/50 border border-outline-variant/30 flex flex-col gap-2' + (it.status === 'dismissed' || it.status === 'stale' ? ' opacity-60' : '') + '">' +
       '<div class="flex items-center justify-between gap-2"><span class="flex items-center gap-1.5 font-label-md text-[12.5px] font-semibold text-on-surface"><span class="material-symbols-outlined text-[16px] text-secondary">' + meta[0] + '</span>' + esc(meta[1]) + '</span>' +
         smartChip(delta, false) + '</div>' +
       '<p class="font-body-sm text-[12px] text-on-surface-variant leading-snug">' + esc(sg.reasoning) + '</p>' +
@@ -2256,11 +2269,11 @@
     });
     updateSmartToolbar();
     if (state.data) renderPage(state.page);
-    bubble('All cab overrides were undone; the rule-based plan is back.', 'assistant');
+    smartStatus('All overrides were undone; the rule-based plan is back.');
   }
   $('smart-plan-btn').addEventListener('click', generateSmartPlan);
   $('smart-reset').addEventListener('click', resetSmartOverrides);
-  $('assistant-thread').addEventListener('click', function (e) {
+  $('smart-results').addEventListener('click', function (e) {
     var a = e.target.closest('[data-smart-apply]');
     if (a) { applySmartOverride(a.getAttribute('data-smart-apply')); return; }
     var d = e.target.closest('[data-smart-dismiss]');
