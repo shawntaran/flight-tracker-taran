@@ -798,5 +798,52 @@ test('the menu points "Run a check now" at runCheckNow; the trigger handler stay
   assert.ok(/newTrigger\('tick'\)/.test(src));
 });
 
+console.log('heartbeat (Status tab)');
+function statusSheetFake(c, opts) {
+  const writes = [], logs = [];
+  const sheet = { getRange: (r, col, nr, nc) => ({ setValues: (v) => writes.push({ r, col, nr, nc, v: plain(v) }), setNumberFormat() {}, setFontWeight() {} }),
+    setFrozenRows() {}, getLastRow: () => 7 };
+  c.SpreadsheetApp = { getActive: () => { if (opts && opts.broken) throw new Error('Service Spreadsheets failed'); return { getSheetByName: () => sheet, insertSheet: () => sheet }; } };
+  c.ScriptApp = { getProjectTriggers: () => (opts && opts.noTrigger ? [] : [{ getHandlerFunction: () => 'tick' }]) };
+  c.logEvent = (lvl, f, m) => logs.push(lvl + ' ' + m);
+  return { writes, logs, value: (k) => (writes[writes.length - 1].v.find((x) => x[0] === k) || [])[1] };
+}
+test('every run writes the heartbeat once (one setValues): time, ok, lookups, trigger, version', () => {
+  const h = tickHarness([tickRow()], { adb: () => OK_LEGS() });
+  const st = statusSheetFake(h.c);
+  h.run('2026-10-20 22:00');
+  assert.strictEqual(st.writes.length, 1);
+  assert.deepStrictEqual([st.writes[0].r, st.writes[0].col, st.writes[0].nr, st.writes[0].nc], [1, 1, 7, 3]);
+  assert.strictEqual(st.value('LAST_TICK_AT'), new Date(h.c.parseIstInput('2026-10-20 22:00')).toISOString());
+  assert.deepStrictEqual(['LAST_TICK_RESULT', 'LAST_TICK_ERROR', 'LAST_TICK_LOOKUPS', 'TRIGGER_INSTALLED'].map(st.value), ['ok', '', '1', 'yes']);
+  assert.strictEqual(st.value('TRACKER_VERSION'), h.c.TRACKER_VERSION);
+});
+test('a failed tick writes an error heartbeat without secrets (max 200 chars) and still rethrows', () => {
+  const token = '123456789' + ':AAFakeTokenForTestsOnly_abcdefghijklmnop';
+  const c = freshCtx();
+  const st = statusSheetFake(c, { noTrigger: true });
+  Object.assign(c, { LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) }, notifyCoordinators_() {},
+    runTick_: () => { throw new Error('Request failed for https://api.telegram.org/bot' + token + '/sendMessage ' + 'x'.repeat(400)); } });
+  assert.throws(() => c.tick(), (e) => !e.message.includes(token));
+  assert.strictEqual(st.value('LAST_TICK_RESULT'), 'error');
+  const err = st.value('LAST_TICK_ERROR');
+  assert.ok(err.length <= 200 && /Request failed/.test(err) && !err.includes('AAFake'), err);
+  assert.strictEqual(st.value('TRIGGER_INSTALLED'), 'no');
+});
+test('a Status write failure is logged and never breaks the run', () => {
+  const h = tickHarness([tickRow()], { adb: () => OK_LEGS() });
+  const st = statusSheetFake(h.c, { broken: true });
+  const res = h.c.runTick_(h.c.parseIstInput('2026-10-20 22:00'));
+  assert.strictEqual(res.lookupsMade, 1);
+  assert.ok(st.logs.some((l) => /Status tab \(heartbeat\) not updated: Service Spreadsheets failed/.test(l)), st.logs.join('\n'));
+});
+test('the dashboard reads back what the tracker wrote; set up but never run = no heartbeat', () => {
+  const c = freshCtx(), now = Date.parse('2026-10-22T08:00:00Z');
+  const rows = c.heartbeatRows_(now, { lookupsMade: 2 }, '', true);
+  assert.deepStrictEqual(plain(c.parseHeartbeat_(rows)), { at: now, result: 'ok', error: '', triggerInstalled: true });
+  assert.strictEqual(c.parseHeartbeat_([['Key', 'Value'], ['LAST_TICK_AT', ''], ['LAST_TICK_RESULT', '']]), null);
+  assert.strictEqual(c.parseHeartbeat_([]), null);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

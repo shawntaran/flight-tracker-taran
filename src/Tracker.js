@@ -193,6 +193,7 @@ function tick() {
   } catch (e) {
     var safe = redactSecrets(e && e.stack || e);
     logEvent('ERROR', '', safe);
+    recordHeartbeat_(Date.now(), null, redactSecrets(e && e.message || e) || 'unknown error');
     try { notifyCoordinators_('⚠️ Flight tracker error: ' + redactSecrets(e && e.message || e) + ' — alerts may be missing until fixed.'); } catch (e2) {}
     throw new Error(redactSecrets(e && e.message || e)); // the original may carry a token-bearing URL
   } finally {
@@ -388,7 +389,9 @@ function runTick_(now, opts) {
   writeFlights(rows);
   var alertsQueued = out.coordMsgs.length + out.directMsgs.length; // before the repeat filter in flush
   out.flush(C);
-  return tickSummary_(rows, opts.forceIds || [], forcedOutcome, before, callsBefore, lookupsDue, alertsQueued, now, C);
+  var summary = tickSummary_(rows, opts.forceIds || [], forcedOutcome, before, callsBefore, lookupsDue, alertsQueued, now, C);
+  recordHeartbeat_(now, summary, ''); // Status tab; never throws
+  return summary;
 }
 
 /** Pure: what a run did, for the menu messages and the heartbeat. */

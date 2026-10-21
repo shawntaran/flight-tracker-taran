@@ -17,7 +17,7 @@ function createSnapshotSource({ readRange, spreadsheetId, now, ttlMs, log }) {
     const read = async (name) => {
       try { return await readRange(spreadsheetId, name); } catch (e) { return { error: (e && e.message) || String(e) }; }
     };
-    const raw = { flights: await read('Flights'), groups: await read('Groups'), config: await read('Config') };
+    const raw = { flights: await read('Flights'), groups: await read('Groups'), config: await read('Config'), status: await read('Status') };
     if (raw.flights.error && cache) {
       log('WARN', 'Sheet refresh failed, using data read at ' + fmtIST(cache.readAt) + ': ' + raw.flights.error);
       return Object.assign({}, cache, { problems: ['tracker data could not be refreshed; it was read at ' + fmtIST(cache.readAt)].concat(cache.problems) });
@@ -59,7 +59,11 @@ function createWorker({ config, telegram, offsetStore, getSnapshot, llm, log, no
     let snapLine;
     try {
       const s = await getSnapshot();
-      snapLine = 'Tracker data: ' + s.flights.length + ' active flight row(s), read ' + fmtIST(s.readAt) + (s.problems.length ? '. Problem: ' + s.problems[0] : '');
+      const lt = s.lastTick;
+      snapLine = (lt && lt.at != null ? 'Tracker last ran ' + fmtIST(lt.at) + (lt.ageMin != null ? ' (' + lt.ageMin + ' min ago)' : '') +
+          (lt.result === 'error' ? ', and that run FAILED' : '') + (lt.triggerInstalled === false ? '. Its 5-minute trigger is NOT installed' : '')
+        : 'Tracker last ran: unknown (no heartbeat on the Status tab)') + '\n' +
+        'Tracker data: ' + s.flights.length + ' active flight row(s), read ' + fmtIST(s.readAt) + (s.problems.length ? '. Problem: ' + s.problems[0] : '');
     } catch (e) { snapLine = 'Tracker data: unavailable'; }
     const h = await llm.health();
     return snapLine + '\nLanguage model: ' + (h.reachable && h.modelListed !== false ? 'available' : 'unavailable (' + (h.detail || 'not reachable') + ')') +

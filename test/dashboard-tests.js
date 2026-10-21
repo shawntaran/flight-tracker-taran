@@ -66,9 +66,12 @@ function sampleEnv(opts = {}) {
     Flights: flightsSheet(G0, SAMPLE),
     Groups: [G0.GROUP_HEADERS, ['A1', 'Arrival', 'BLR', 'T2', 'Tue 20 Oct 15:58', 'Prof. A', 'EK568 14:48', 1, 'Innova', 'Ramesh K.', '5550002', 'F2']],
     Log: [['Time (IST)', 'Level', 'Flight', 'Message'], [new Date(NOW - 60000), 'INFO', 'EK568', 'Delayed; token bot' + FAKE_TG + ' seen']],
-    Config: [['Key', 'Value', 'Notes']]
+    Config: [['Key', 'Value', 'Notes']],
+    Status: [['Key', 'Value', 'Notes'], ['LAST_TICK_AT', new Date(NOW - 4 * 60000).toISOString(), ''], ['LAST_TICK_RESULT', 'error', ''],
+      ['LAST_TICK_ERROR', 'boom bot' + FAKE_TG, ''], ['LAST_TICK_LOOKUPS', '0', ''], ['TRIGGER_INSTALLED', 'no', ''], ['TRACKER_VERSION', 'x', '']]
   };
   if (opts.dropFlights) delete sheets.Flights;
+  if (opts.dropStatus) delete sheets.Status;
   const fake = fakeSpreadsheet(sheets);
   const store = {}, calls = [];
   const G = load({
@@ -111,6 +114,17 @@ test('groups are joined with their members, pickup and driver', () => {
   const { G } = sampleEnv();
   const g = G.getDashboardData().groups[0];
   assert.deepStrictEqual(JSON.parse(JSON.stringify(g)), { id: 'A1', count: 1, vehicle: 'Innova', driver: 'Ramesh K.', pickupDisp: 'Tue 20 Oct 15:58' });
+});
+test('the contract includes lastTick from the Status tab (redacted), and the page warns on it', () => {
+  const { G } = sampleEnv();
+  const d = G.getDashboardData();
+  assert.deepStrictEqual(Object.keys(d.lastTick).sort(), ['at', 'error', 'result', 'triggerInstalled']);
+  assert.deepStrictEqual([d.lastTick.at, d.lastTick.result, d.lastTick.triggerInstalled], [NOW - 4 * 60000, 'error', false]);
+  assert.ok(/^boom bot\[REDACTED\]/.test(d.lastTick.error), d.lastTick.error);
+  const { G: G2 } = sampleEnv({ dropStatus: true });
+  assert.strictEqual(G2.getDashboardData().lastTick, null, 'no Status tab: null, never an invented heartbeat');
+  assert.ok(/id="heartbeat-line"/.test(PAGE) && /id="hb-banner"/.test(PAGE));
+  assert.ok(/var HEARTBEAT_STALE_MIN = 15;/.test(PAGE) && /lt\.triggerInstalled === false/.test(PAGE) && /lt\.result === 'error'/.test(PAGE));
 });
 test('engine, usage, log and attribution are reported; every value is JSON-safe (no Date objects)', () => {
   const { G } = sampleEnv();

@@ -145,11 +145,13 @@ test('a Flights read error is reported, not replaced by Import data', async () =
   const tabs = fullTabs(); tabs.Flights = { error: 'Sheets read of "Flights" failed: HTTP 500' };
   await assert.rejects(source(tabs).get(), /HTTP 500/);
 });
-test('a missing Status tab is reported as "no heartbeat", not hidden', async () => {
+test('no heartbeat (Status tab missing, or set up but never run) -> lastTick null; the page warns', async () => {
   const tabs = fullTabs(); delete tabs.Status;
-  const d = await source(tabs).get();
-  assert.strictEqual(d.lastTick, null);
-  assert.ok(d.errors.some((e) => /no tracker heartbeat/.test(e)));
+  assert.strictEqual((await source(tabs).get()).lastTick, null);
+  tabs.Status = [['Key', 'Value', 'Notes'], ['LAST_TICK_AT', '', ''], ['LAST_TICK_RESULT', '', '']];
+  assert.strictEqual((await source(tabs).get()).lastTick, null);
+  const page = fs.readFileSync(path.join(ROOT, 'tools', 'preview-app.html'), 'utf8');
+  assert.ok(/if \(!lt \|\| !lt\.at\) return \{ line: 'tracker heartbeat: none yet', warn: 'No tracker heartbeat/.test(page));
 });
 
 console.log('cache and the Refresh button');

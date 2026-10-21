@@ -51,6 +51,7 @@ function runCheckNow() {
   } catch (e) {
     var msg = redactSecrets(e && e.message || e);
     logEvent('ERROR', '', 'Run a check now failed: ' + msg);
+    recordHeartbeat_(Date.now(), null, msg);
     ui.alert('The check failed: ' + msg);
     return;
   } finally { lock.releaseLock(); }
@@ -83,6 +84,7 @@ function forceCheckFlight() {
   } catch (e) {
     var msg = redactSecrets(e && e.message || e);
     logEvent('ERROR', '', 'Force check failed: ' + msg);
+    recordHeartbeat_(Date.now(), null, msg);
     ui.alert('The force check failed: ' + msg);
     return;
   } finally { lock.releaseLock(); }

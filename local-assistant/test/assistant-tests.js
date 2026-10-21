@@ -402,6 +402,50 @@ test('no write operation exists anywhere in the worker source', () => {
 });
 
 // ---------------------------------------------------------------- run
+// ---------------------------------------------------------------- tracker heartbeat (Status tab)
+tests.push([null, 'tracker heartbeat']);
+const statusTab = (o) => [['Key', 'Value', 'Notes']].concat(Object.entries(Object.assign({ LAST_TICK_AT: iso(NOW - 3 * MIN), LAST_TICK_RESULT: 'ok',
+  LAST_TICK_ERROR: '', LAST_TICK_LOOKUPS: '1', TRIGGER_INSTALLED: 'yes', TRACKER_VERSION: 'x' }, o)).map(([k, v]) => [k, v, '']));
+const snapWith = (status) => buildSnapshot(Object.assign({}, RAW, { status }), NOW);
+test('a fresh, ok heartbeat adds no note; lastTick reaches the snapshot and the model context', async () => {
+  const s = snapWith({ rows: statusTab() });
+  assert.deepStrictEqual([s.heartbeatProblem, s.lastTick.ageMin, s.lastTick.stale], ['', 3, false]);
+  assert.ok(!/Note:/.test((await A.answer('/delayed', deps(okLlm('x'), s))).text));
+  const ctx = A.buildModelContext(s, 'who is delayed?', [], NOW);
+  assert.deepStrictEqual(ctx.lastTick, { lastRun: 'Wed 21 Oct 07:57 IST', minutesAgo: 3, result: 'ok', stale: false, note: null });
+  assert.ok(/9\. If TRACKER DATA\.lastTick\.stale is true or lastTick is missing, say FIRST/.test(A.SYSTEM_PROMPT));
+});
+for (const [what, status, re] of [
+  ['stale (older than 15 min)', { rows: statusTab({ LAST_TICK_AT: iso(NOW - 40 * MIN) }) }, /Note: the tracker hasn't updated since 07:20 IST; times may be stale\./],
+  ['missing (no Status tab)', { missing: true }, /Note: the tracker has no heartbeat on the Status tab, so it may not be running; times may be stale\./],
+  ['an error result', { rows: statusTab({ LAST_TICK_RESULT: 'error', LAST_TICK_ERROR: 'Sheet changed' }) }, /Note: the tracker's last run at 07:57 IST failed \(Sheet changed\); times may be stale\./]]) {
+  test('a heartbeat that is ' + what + ' puts the note on every answer, commands and model answers alike', async () => {
+    const s = snapWith(status);
+    for (const q of ['/delayed', '/cabs', '/flight EK568', 'Who is delayed?']) {
+      const r = await A.answer(q, deps(okLlm('EK568 (Dr Asha Sharma) is delayed.'), s));
+      assert.ok(re.test(r.text), q + ' -> ' + r.text);
+    }
+    assert.ok(/EK568/.test((await A.answer('/delayed', deps(okLlm('x'), s))).text), 'the note does not replace the data');
+    assert.strictEqual(A.buildModelContext(s, 'q', [], NOW).lastTick.stale, true);
+  });
+}
+test('a stale heartbeat with an empty Flights tab is not mistaken for "cannot read the sheet"', async () => {
+  const s = buildSnapshot({ flights: { rows: [FH] }, groups: { rows: GROUPS }, config: { rows: CONFIG }, status: { missing: true } }, NOW);
+  const t = (await A.answer('/delayed', deps(okLlm('x'), s))).text;
+  assert.ok(!/can't read the tracker sheet/.test(t) && /No tracked flight is currently delayed/.test(t) && /no heartbeat/.test(t), t);
+});
+test('/status shows when the tracker last ran; the worker reads the Status tab read-only', async () => {
+  const reads = [];
+  const src = createSnapshotSource({ readRange: async (id, tab) => { reads.push(tab); return { rows: { Flights: FLIGHTS, Groups: GROUPS, Config: CONFIG, Status: statusTab() }[tab] }; },
+    spreadsheetId: 's', now: () => NOW, ttlMs: 60000, log() {} });
+  assert.strictEqual((await src()).lastTick.result, 'ok');
+  assert.deepStrictEqual(reads, ['Flights', 'Groups', 'Config', 'Status']);
+  const tg = fakeTelegram([[msg(70, 111, '/status')]]);
+  const { w } = mkWorker(tg, { offset: 70, getSnapshot: src });
+  await w.pollOnce();
+  assert.ok(/^Tracker last ran Wed 21 Oct 07:57 IST \(3 min ago\)\n/.test(tg.sent[0][1]), tg.sent[0][1]);
+});
+
 (async () => {
   for (const [name, fn] of tests) {
     if (name === null) { console.log(fn); continue; }

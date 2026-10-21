@@ -224,6 +224,7 @@
   <!-- ===== CONTENT ===== -->
   <main class="relative mt-16 bg-background flex-1 w-full px-gutter py-space-md">
     <div id="banner" class="hidden mb-space-md p-3 rounded-lg bg-error-container text-on-error-container font-body-sm text-body-sm"></div>
+    <div id="hb-banner" role="alert" class="hidden mb-space-md p-3 rounded-lg bg-error-container text-on-error-container font-body-sm text-body-sm"></div>
 
     <!-- ==================== PAGE: OVERVIEW ==================== -->
     <div id="page-overview" class="flex flex-col w-full">
@@ -860,7 +861,7 @@
     $$('[data-f="home"]').forEach(function (el) { el.textContent = d.homeAirport || 'BLR'; });
     $('today').textContent = 'Today, ' + dateFmt.format(now);
     $('attribution').textContent = d.attribution;
-    $('data-source-line').textContent = 'Data: ' + (d.preview ? 'mock data (local preview)' : d.source || 'unknown source');
+    renderHeartbeat(d); // data source line + heartbeat warning
     renderEngine(d);
     refreshAssistantStatus();
   }
@@ -2364,6 +2365,25 @@
     if (!state.loadedAt) return;
     var m = mins(Date.now(), state.loadedAt);
     $('synced-ago').textContent = m < 1 ? 'Synced just now' : 'Synced ' + dur(m) + ' ago';
+    renderHeartbeat(state.data);
+  }
+
+  // ---- heartbeat (Status tab): same rules as src/DashboardPage.html. Import-tab and mock data have none.
+  var HEARTBEAT_STALE_MIN = 15;
+  function heartbeatView(lt, nowMs) {
+    if (!lt || !lt.at) return { line: 'tracker heartbeat: none yet', warn: 'No tracker heartbeat on the Status tab yet: the tracker may never have run. Run "1. Set up sheets", then "4. Start tracking".' };
+    var ago = Math.max(0, mins(nowMs, lt.at)), warns = [];
+    if (lt.result === 'error') warns.push('The tracker\'s last run failed' + (lt.error ? ': ' + lt.error : '') + '.');
+    if (ago > HEARTBEAT_STALE_MIN) warns.push('The tracker has not run for ' + dur(ago) + '; times and statuses may be stale.');
+    if (lt.triggerInstalled === false) warns.push('The 5-minute trigger is not installed (menu "4. Start tracking").');
+    return { line: 'Tracker last ran ' + hm(lt.at) + ' IST (' + (ago < 1 ? 'just now' : dur(ago) + ' ago') + ')' + (lt.result === 'error' ? ', failed' : ''), warn: warns.join(' ') };
+  }
+  function renderHeartbeat(d) {
+    var tracked = d && !d.preview && /Flights tab/.test(d.source || '');
+    var v = tracked ? heartbeatView(d.lastTick, Date.now()) : { line: '', warn: '' };
+    $('data-source-line').textContent = 'Data: ' + (!d ? '' : d.preview ? 'mock data (local preview)' : d.source || 'unknown source') + (v.line ? ' · ' + v.line : '');
+    $('hb-banner').textContent = v.warn;
+    $('hb-banner').classList.toggle('hidden', !v.warn);
   }
   setInterval(tickAgo, 30000);
   setInterval(function () { if (!document.hidden) load(); }, REFRESH_MS);

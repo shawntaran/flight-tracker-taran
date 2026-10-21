@@ -93,7 +93,7 @@ function mapGroupsRows(rows, flights) {
 function readStatusRows(rows, redact) {
   const kv = {};
   (Array.isArray(rows) ? rows.slice(1) : []).forEach((r) => { if (Array.isArray(r) && text(r[0], 40)) kv[text(r[0], 40)] = r[1]; });
-  if (!('LAST_TICK_AT' in kv)) return null;
+  if (!('LAST_TICK_AT' in kv) || (!text(kv.LAST_TICK_AT) && !text(kv.LAST_TICK_RESULT))) return null; // set up, never run
   const inst = text(kv.TRIGGER_INSTALLED, 5).toLowerCase();
   return { at: parseTime(kv.LAST_TICK_AT), result: text(kv.LAST_TICK_RESULT, 10).toLowerCase() || '',
     error: redact(text(kv.LAST_TICK_ERROR, 200)), triggerInstalled: inst === 'yes' ? true : inst === 'no' ? false : null };
@@ -149,8 +149,7 @@ function createSheetSource(opts) {
     if (!m.usable) return readImport(t, conf, [FALLBACK_NOTE]);                   // never silently
     if (gr.error) errors.push('Groups: ' + gr.error);
     if (st.error) errors.push('Status: ' + st.error);
-    const lastTick = st.rows ? readStatusRows(st.rows, redact) : null;
-    if (!lastTick) errors.push('Status tab has no tracker heartbeat yet: run "1. Set up sheets", then let the tracker run');
+    const lastTick = st.rows ? readStatusRows(st.rows, redact) : null; // null: the page warns "no heartbeat"
     return payload(t, conf, SOURCE_FLIGHTS, m.flights, gr.rows ? mapGroupsRows(gr.rows, m.flights) : [], errors, lastTick);
   }
 

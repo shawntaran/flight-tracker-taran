@@ -34,6 +34,7 @@ function getDashboardData() {
   f.rows = attempt('Flights', readFlights) || [];
   f.groups = attempt('Groups', readGroupsSheet) || [];
   f.log = attempt('Log', function () { return readRecentLog_(DASHBOARD_LOG_ROWS); }) || [];
+  f.lastTick = attempt('Status', readHeartbeat_);
   f.tickTriggers = attempt('Triggers', function () {
     return ScriptApp.getProjectTriggers().filter(function (t) { return t.getHandlerFunction() === 'tick'; }).length;
   });
@@ -64,6 +65,7 @@ function forceCheckFromDashboard(id) {
   } catch (e) {
     var msg = redactSecrets(e && e.message || e);
     logEvent('ERROR', '', 'Force check from the dashboard failed: ' + msg);
+    recordHeartbeat_(Date.now(), null, msg);
     return { ok: false, error: 'The force check failed: ' + msg };
   } finally { lock.releaseLock(); }
 }
@@ -102,7 +104,8 @@ function buildDashboardData_(f) {
       window: f.usage.window, units: f.usage.units, unitLimit: f.usage.unitLimit, requests: f.usage.requests,
       requestLimit: f.usage.requestLimit, suspended: f.usage.suspended ? String(f.usage.suspended.reason || 'suspended') : ''
     } : null,
-    usageError: f.usageError || '', errors: f.errors || [], assistant: { enabled: !!f.assistantEnabled }
+    usageError: f.usageError || '', errors: f.errors || [], assistant: { enabled: !!f.assistantEnabled },
+    lastTick: f.lastTick || null // {at, result, error, triggerInstalled} from the Status tab, or null (no heartbeat yet)
   };
 }
 

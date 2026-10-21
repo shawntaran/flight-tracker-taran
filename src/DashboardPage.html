@@ -125,6 +125,8 @@
     <div class="flex flex-col min-w-0">
       <span class="font-headline-sm text-headline-sm text-primary leading-tight">Flight Operations</span>
       <span class="font-body-sm text-body-sm text-on-surface-variant hidden sm:inline truncate">Monitor arrivals, departures, and airport transfers</span>
+      <!-- Heartbeat from the Status tab: when the tracker last ran (always visible) -->
+      <span id="heartbeat-line" class="font-data-mono text-[10px] leading-tight text-on-surface-variant truncate"></span>
     </div>
     <div class="flex items-center gap-space-md">
       <div class="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded bg-surface-container-low border border-outline-variant/40" title="Date selection is not available yet">
@@ -157,6 +159,7 @@
   <main class="relative mt-16 bg-background flex-1 w-full px-gutter py-space-md">
     <div class="flex flex-col w-full">
       <div id="banner" class="hidden mb-space-md p-3 rounded-lg bg-error-container text-on-error-container font-body-sm text-body-sm"></div>
+      <div id="hb-banner" role="alert" class="hidden mb-space-md p-3 rounded-lg bg-error-container text-on-error-container font-body-sm text-body-sm"></div>
 
       <!-- Top metrics -->
       <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 bg-surface-container-lowest rounded-xl shadow-sm mb-space-lg">
@@ -686,6 +689,24 @@
     if (!state.loadedAt) return;
     var m = mins(Date.now(), state.loadedAt);
     $('synced-ago').textContent = m < 1 ? 'Synced just now' : 'Synced ' + dur(m) + ' ago';
+    renderHeartbeat(state.data && state.data.lastTick);
+  }
+
+  // ---- heartbeat: is the tracker actually running? (Status tab, written by every run)
+  var HEARTBEAT_STALE_MIN = 15;
+  function heartbeatView(lt, nowMs) {
+    if (!lt || !lt.at) return { line: 'Tracker heartbeat: none yet', warn: 'No tracker heartbeat on the Status tab yet: the tracker may never have run. Run "1. Set up sheets", then "4. Start tracking".' };
+    var ago = Math.max(0, mins(nowMs, lt.at)), warns = [];
+    if (lt.result === 'error') warns.push('The tracker\'s last run failed' + (lt.error ? ': ' + lt.error : '') + '.');
+    if (ago > HEARTBEAT_STALE_MIN) warns.push('The tracker has not run for ' + dur(ago) + '; times and statuses may be stale.');
+    if (lt.triggerInstalled === false) warns.push('The 5-minute trigger is not installed (menu "4. Start tracking").');
+    return { line: 'Tracker last ran ' + hm(lt.at) + ' IST (' + (ago < 1 ? 'just now' : dur(ago) + ' ago') + ')' + (lt.result === 'error' ? ', failed' : ''), warn: warns.join(' ') };
+  }
+  function renderHeartbeat(lt) {
+    var v = heartbeatView(lt, Date.now());
+    $('heartbeat-line').textContent = v.line;
+    $('hb-banner').textContent = v.warn;
+    $('hb-banner').classList.toggle('hidden', !v.warn);
   }
   setInterval(tickAgo, 30000);
   setInterval(function () { if (!document.hidden) load(); }, REFRESH_MS);

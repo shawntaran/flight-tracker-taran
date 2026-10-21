@@ -124,6 +124,9 @@ function setupSheets() {
     us.setFrozenRows(1);
   }
 
+  // Status: the tracker's heartbeat. Created once with its keys; never cleared (runs overwrite the values).
+  if (!ss.getSheetByName(STATUS_SHEET)) prepareStatusSheet_(getOrCreateSheet_(STATUS_SHEET));
+
   var about = getOrCreateSheet_('About');
   about.clearContents();
   about.getRange(1, 1, 6, 1).setValues([
@@ -137,6 +140,72 @@ function setupSheets() {
     ['Attribution wording is not published by AeroDataBox; confirm it with them before wider use.']
   ]);
   about.getRange(1, 1).setFontWeight('bold');
+}
+
+// ---------------------------------------------------------------- heartbeat (Status tab)
+/*
+ * "Is the tracker actually running?" Every run writes these rows in ONE setValues call, fixed at rows 1-7,
+ * so the dashboard, the local preview and the Telegram assistant can tell fresh data from stale data.
+ * Values are plain text (column B is formatted as text so the ISO time is never turned into a date).
+ */
+var STATUS_SHEET = 'Status';
+var TRACKER_VERSION = '2026-10-22 heartbeat-1';
+var HEARTBEAT_STALE_MIN = 15;
+var HEARTBEAT_NOTES = [
+  ['LAST_TICK_AT', 'When the tracker last finished or failed a run (UTC, ISO 8601). Written by the script; do not edit.'],
+  ['LAST_TICK_RESULT', 'ok or error'],
+  ['LAST_TICK_ERROR', 'The last run\'s error (secrets removed, at most 200 characters); blank after a good run'],
+  ['LAST_TICK_LOOKUPS', 'Provider requests made in that run (AeroDataBox, FlightAware backup, first-leg checks)'],
+  ['TRIGGER_INSTALLED', 'yes if the 5-minute "tick" trigger exists (menu "4. Start tracking"), otherwise no'],
+  ['TRACKER_VERSION', 'Version of the tracker code that wrote these rows']
+];
+
+function prepareStatusSheet_(sh) {
+  sh.getRange(1, 2, 7, 1).setNumberFormat('@');
+  sh.getRange(1, 1, 7, 3).setValues([['Key', 'Value', 'Notes']].concat(HEARTBEAT_NOTES.map(function (n) { return [n[0], '', n[1]]; })));
+  sh.getRange(1, 1, 1, 3).setFontWeight('bold');
+  sh.setFrozenRows(1);
+}
+
+/** Pure: the 7 Status rows for one run. res = runTick_'s summary (null on error); error = message or ''. */
+function heartbeatRows_(nowMs, res, error, triggerInstalled) {
+  var values = {
+    LAST_TICK_AT: new Date(nowMs).toISOString(), LAST_TICK_RESULT: error ? 'error' : 'ok',
+    LAST_TICK_ERROR: error ? redactSecrets(error).slice(0, 200) : '',
+    LAST_TICK_LOOKUPS: res ? String(res.lookupsMade) : '',
+    TRIGGER_INSTALLED: triggerInstalled == null ? '' : triggerInstalled ? 'yes' : 'no', TRACKER_VERSION: TRACKER_VERSION
+  };
+  return [['Key', 'Value', 'Notes']].concat(HEARTBEAT_NOTES.map(function (n) { return [n[0], values[n[0]], n[1]]; }));
+}
+
+/** Writes the heartbeat. Never throws: a Status write problem is logged and must not break a run. */
+function recordHeartbeat_(nowMs, res, error) {
+  try {
+    var trigger = null;
+    try { trigger = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'tick'; }); } catch (e) { trigger = null; }
+    var sh = ss_().getSheetByName(STATUS_SHEET);
+    if (!sh) { sh = ss_().insertSheet(STATUS_SHEET); prepareStatusSheet_(sh); }
+    sh.getRange(1, 1, 7, 3).setValues(heartbeatRows_(nowMs, res, error, trigger));
+  } catch (e) {
+    try { logEvent('WARN', '', 'Status tab (heartbeat) not updated: ' + redactSecrets(e && e.message || e)); } catch (e2) { /* never break a run */ }
+  }
+}
+
+/** Pure: Status tab values -> {at, result, error, triggerInstalled} or null when there is no heartbeat yet. */
+function parseHeartbeat_(values) {
+  var kv = {};
+  (values || []).slice(1).forEach(function (r) { if (r && String(r[0]).trim()) kv[String(r[0]).trim()] = r[1]; });
+  var at = toMs(kv.LAST_TICK_AT);
+  if (!('LAST_TICK_AT' in kv) || (kv.LAST_TICK_AT === '' && !kv.LAST_TICK_RESULT)) return null;
+  var trig = String(kv.TRIGGER_INSTALLED || '').toLowerCase();
+  return { at: at, result: String(kv.LAST_TICK_RESULT || '').toLowerCase(), error: redactSecrets(String(kv.LAST_TICK_ERROR || '')).slice(0, 200),
+    triggerInstalled: trig === 'yes' ? true : trig === 'no' ? false : null };
+}
+
+function readHeartbeat_() {
+  var sh = ss_().getSheetByName(STATUS_SHEET);
+  if (!sh || sh.getLastRow() < 2) return null;
+  return parseHeartbeat_(sh.getRange(1, 1, sh.getLastRow(), 2).getValues());
 }
 
 function appendUsageRow_(e) {

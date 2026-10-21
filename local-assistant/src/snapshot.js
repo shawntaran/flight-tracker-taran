@@ -3,7 +3,30 @@
 // contract 1), and only an allowlist of fields is copied: no phone, email, Telegram id, notes,
 // errors, drivers or vehicles ever enter the snapshot.
 
-const { MIN, parseTime } = require('./time');
+const { MIN, parseTime, fmtTimeIST } = require('./time');
+
+const HEARTBEAT_STALE_MIN = 15; // same as the tracker's HEARTBEAT_STALE_MIN (src/Sheet.js)
+
+/** Status tab (Key / Value / Notes, written by every tracker run) -> heartbeat or null if there is none. */
+function readHeartbeat(rows, nowMs) {
+  const kv = {};
+  (Array.isArray(rows) ? rows.slice(1) : []).forEach((r) => { if (Array.isArray(r) && clean(r[0], 40)) kv[clean(r[0], 40)] = r[1]; });
+  const at = parseTime(kv.LAST_TICK_AT);
+  if (at == null && !clean(kv.LAST_TICK_RESULT, 10)) return null;
+  const trig = clean(kv.TRIGGER_INSTALLED, 5).toLowerCase();
+  const result = clean(kv.LAST_TICK_RESULT, 10).toLowerCase();
+  return { at, result, error: clean(kv.LAST_TICK_ERROR, 200), triggerInstalled: trig === 'yes' ? true : trig === 'no' ? false : null,
+    ageMin: at == null ? null : Math.round((nowMs - at) / MIN), stale: at == null || result === 'error' || nowMs - at > HEARTBEAT_STALE_MIN * MIN };
+}
+
+/** The note every answer carries when the tracker may not be running, or '' when the heartbeat is fresh and ok. */
+function heartbeatProblem(src, lt) {
+  if (src && src.error) return 'the tracker\'s heartbeat (Status tab) could not be read; times may be stale';
+  if (!lt || lt.at == null) return 'the tracker has no heartbeat on the Status tab, so it may not be running; times may be stale';
+  if (lt.result === 'error') return 'the tracker\'s last run at ' + fmtTimeIST(lt.at) + ' failed' + (lt.error ? ' (' + lt.error.slice(0, 80) + ')' : '') + '; times may be stale';
+  if (lt.stale) return 'the tracker hasn\'t updated since ' + fmtTimeIST(lt.at) + '; times may be stale';
+  return '';
+}
 
 const KNOWN_STATUS = ['SCHEDULED', 'DELAYED', 'DEPARTED', 'LANDED', 'CANCELLED', 'DIVERTED', 'UNKNOWN'];
 const FINAL = { arrival: ['LANDED', 'CANCELLED', 'DIVERTED'], departure: ['DEPARTED', 'CANCELLED', 'DIVERTED'] };
@@ -76,14 +99,23 @@ function readConfig(rows) {
 }
 
 /**
- * raw: {flights, groups, config}: each {rows} | {missing: true} | {error: 'text'} | undefined.
- * Never throws: every problem becomes a line in snapshot.problems.
+ * raw: {flights, groups, config, status}: each {rows} | {missing: true} | {error: 'text'} | undefined.
+ * Never throws: every problem becomes a line in snapshot.problems. When the Status tab was read (the
+ * worker always reads it), a stale, missing or failed heartbeat becomes the FIRST problem line, so every
+ * answer carries it; snap.heartbeatProblem names that line.
  */
 function buildSnapshot(raw, nowMs) {
   raw = raw || {};
   const problems = [];
   const conf = readConfig(raw.config && raw.config.rows);
-  const snap = { readAt: nowMs, homeAirport: conf.homeAirport, staleMin: conf.staleMin, flights: [], cabSuggestions: [], problems };
+  const snap = { readAt: nowMs, homeAirport: conf.homeAirport, staleMin: conf.staleMin, flights: [], cabSuggestions: [], problems,
+    lastTick: null, heartbeatProblem: '' };
+  if ('status' in raw) {
+    const st = raw.status || {};
+    snap.lastTick = st.rows ? readHeartbeat(st.rows, nowMs) : null;
+    snap.heartbeatProblem = heartbeatProblem(st, snap.lastTick);
+    if (snap.heartbeatProblem) problems.push(snap.heartbeatProblem);
+  }
 
   const src = raw.flights || {};
   const F = src.rows ? table(src.rows) : null;
@@ -142,4 +174,4 @@ function buildSnapshot(raw, nowMs) {
   return snap;
 }
 
-module.exports = { buildSnapshot, normFlight, clean, KNOWN_STATUS };
+module.exports = { buildSnapshot, normFlight, clean, KNOWN_STATUS, readHeartbeat, HEARTBEAT_STALE_MIN };
