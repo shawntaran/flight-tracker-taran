@@ -388,6 +388,7 @@ npm run doctor
 | Low | Anyone with edit access to the sheet can add a Telegram recipient (Config, Groups, Flights) | That is the trust model: share edit access only with coordinators. Check setup and "Check Telegram bot" show every configured chat and flag groups and public chats |
 | Low | A wrong coordinator chat id fails again for each new alert (one request each), until fixed | Visible as FAILED rows, in Log and in Check setup; no retry storm |
 | Low | Telegram sending runs inside the tick's script lock (up to about 20 s, plus at most one 3 s wait) | Another menu action may wait. Moving sends outside the lock needs a Tracker.js change |
+| Medium: known gap | Smart Cab Plan overrides live only in the preview browser's memory (`CabSuggestions.applyOverride`). `tick()`, the Groups tab, driver notifications and Telegram `/cabs` never see them, and a page reload drops them | A coordinator can see an AI-adjusted cab on the preview while drivers and the bot work from the rule-based plan. Design note in §14 "Override gap"; nothing implemented |
 
 ## 10. Decisions and rationale
 
@@ -693,3 +694,12 @@ Three Claude Code sessions share this working folder. They are not in separate g
   - make the doctor run every suite listed in `npm test` (it skips `flight-sort-tests.js` and `flight-position-tests.js`); coordinate with UI Design,
   - T5 (OpenSky ETA check, needs a live deployment),
   - duplicate NOTFOUND/FAIL2 alerts.
+
+**Override gap: Smart Cab Plan overrides are not persisted** (design note only, 2026-10-22; nothing implemented):
+- **Today:** an override applied on the preview's Cab Suggestions page lives in that browser tab's memory (`CabSuggestions.applyOverride`). The tracker (`runTick_` → `planGroups`), the Groups tab, driver and faculty notifications, and the Telegram assistant's `/cabs` all use the rule-based plan only.
+- **If overrides must reach drivers or the bot,** they need a persisted store that the tracker applies, for example an **Overrides** tab:
+  - one row per override: group or member IDs, the pickup time, an expiry, and who applied it and when,
+  - `runTick_` applies the unexpired rows after `planGroups()` and before `applyGroups()`, so the existing change-suppression and notification rules cover them,
+  - a row whose flights no longer fit (the same check as `applyOverride`) is skipped and reported, never forced.
+- **Writes go through Apps Script only** (a menu item or the owner-only web app). The local assistant and the local preview stay read-only (`spreadsheets.readonly`, GET only); they can show overrides but must never write them.
+- This is a schema and architecture decision for the owner. The Smart Cab Plan code (`tools/smart-dispatch.js`, `CabSuggestions.applyOverride`, its UI and tests) is the owner's and was not changed.
