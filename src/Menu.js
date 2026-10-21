@@ -192,7 +192,10 @@ function resumeAdb() {
 /**
  * Paste the "ITW Faculty Travel Details.xlsx" sheet (headers in row 1) into a tab named "Import",
  * then run this. Headers are matched loosely; each person can produce an Arrival and a Departure row.
- * Rows already in Flights (same name + flight + direction) are skipped. Passport-like columns are ignored.
+ * New rows are added. For rows already in Flights (same name + flight + direction) a changed scheduled
+ * time or terminal is listed and, after a YES, written to the coordinator's input cells only (never the
+ * output or machine columns; the tracker resets a row's state itself when its time changes). A probable
+ * flight-number change is only listed. Passport-like columns are ignored.
  */
 function importTravelDetails() {
   var src = SpreadsheetApp.getActive().getSheetByName(IMPORT);
@@ -218,45 +221,129 @@ function importTravelDetails() {
     throw new Error('Could not find Name and Flight columns. Headers seen: ' + data[0].join(' | '));
   }
 
-  var existing = readFlights().map(function (r) {
-    return [String(r.name).toLowerCase(), String(normalizeFlight(r.flightRaw) && normalizeFlight(r.flightRaw).flight), /^d/i.test(r.direction) ? 'D' : 'A'].join('|');
-  });
-  var sh = SpreadsheetApp.getActive().getSheetByName(FLIGHTS), nextRow = sh.getLastRow() + 1, added = [], skipped = 0;
   var get = function (row, i) { return i >= 0 ? row[i] : ''; };
-
-  data.slice(1).forEach(function (row, n) {
+  var incoming = [];
+  data.slice(1).forEach(function (row) {
     var name = String(get(row, col.name)).trim();
     if (!name) return;
     [['Arrival', col.arrFlight, col.arrDate, col.arrTime, col.arrTerm >= 0 ? col.arrTerm : col.term],
      ['Departure', col.depFlight, col.depDate, col.depTime, col.depTerm >= 0 ? col.depTerm : col.term]].forEach(function (d) {
       var flight = String(get(row, d[1])).trim();
       if (!flight) return;
-      var f = normalizeFlight(flight);
-      var key = [name.toLowerCase(), String(f && f.flight), d[0][0]].join('|');
-      if (existing.indexOf(key) >= 0) { skipped++; return; }
-      var when = combineDateTime_(get(row, d[2]), get(row, d[3]));
-      var rec = COLS.filter(function (c) { return c.kind === 'in'; }).map(function (c) {
-        switch (c.k) {
-          case 'id': return 'F' + (nextRow + added.length); // unique: sheet row it lands on
-          case 'name': return name;
-          case 'phone': return String(get(row, col.phone));
-          case 'email': return String(get(row, col.email));
-          case 'direction': return d[0];
-          case 'flightRaw': return flight;
-          case 'schedArrIn': return d[0] === 'Arrival' ? when : '';
-          case 'schedDepIn': return d[0] === 'Departure' ? when : '';
-          case 'terminal': return String(get(row, d[4]));
-          case 'active': return true;
-          case 'notes': return when ? '' : 'CHECK: time not parsed from import';
-          default: return '';
-        }
-      });
-      added.push(rec);
+      incoming.push({ name: name, dir: d[0], flight: flight, when: combineDateTime_(get(row, d[2]), get(row, d[3])),
+        terminal: String(get(row, d[4])), phone: String(get(row, col.phone)), email: String(get(row, col.email)) });
+    });
+  });
+
+  var ui = SpreadsheetApp.getUi();
+  var plan = planImportChanges_(readFlights(), incoming);
+  var sh = SpreadsheetApp.getActive().getSheetByName(FLIGHTS), nextRow = sh.getLastRow() + 1;
+  var added = plan.add.map(function (inc, i) {
+    return COLS.filter(function (c) { return c.kind === 'in'; }).map(function (c) {
+      switch (c.k) {
+        case 'id': return 'F' + (nextRow + i); // unique: sheet row it lands on
+        case 'name': return inc.name;
+        case 'phone': return inc.phone;
+        case 'email': return inc.email;
+        case 'direction': return inc.dir;
+        case 'flightRaw': return inc.flight;
+        case 'schedArrIn': return inc.dir === 'Arrival' ? inc.when : '';
+        case 'schedDepIn': return inc.dir === 'Departure' ? inc.when : '';
+        case 'terminal': return inc.terminal;
+        case 'active': return true;
+        case 'notes': return inc.when ? '' : 'CHECK: time not parsed from import';
+        default: return '';
+      }
     });
   });
   if (added.length) sh.getRange(nextRow, 1, added.length, added[0].length).setValues(added);
-  SpreadsheetApp.getUi().alert('Imported ' + added.length + ' flight rows (' + skipped + ' already present).\n' +
+
+  var updated = 0;
+  if (plan.updates.length || plan.flightChanges.length) {
+    var text = describeImportChanges_(plan);
+    if (plan.updates.length) {
+      var yes = ui.alert('Import: changes to existing rows', text + '\n\nApply the ' + plan.updates.length +
+        ' time/terminal update(s) to the Flights tab? Only the coordinator columns are changed; the tracker re-checks those rows.',
+        ui.ButtonSet.YES_NO) === ui.Button.YES;
+      if (yes) {
+        plan.updates.forEach(function (u) { sh.getRange(u.row, colIndex_(u.field) + 1).setValue(u.value); });
+        updated = plan.updates.length;
+      }
+    } else {
+      ui.alert('Import: possible flight changes', text, ui.ButtonSet.OK);
+    }
+  }
+  ui.alert('Import finished: ' + added.length + ' added, ' + updated + ' updated' +
+    (plan.updates.length > updated ? ' (' + (plan.updates.length - updated) + ' change(s) NOT applied)' : '') + ', ' +
+    plan.unchanged + ' unchanged, ' + plan.flightChanges.length + ' possible flight change(s).\n' +
     'Check the Sched Arr / Sched Dep columns are IST and rows marked CHECK in Notes.');
+}
+
+/**
+ * Pure: Flights rows (readFlights) + Import records -> what an import would do.
+ * incoming: [{name, dir: 'Arrival'|'Departure', flight, when: Date | '' (unparseable), terminal}]
+ * -> {add: [incoming], updates: [{row, id, name, dir, field, label, from, to, value}], unchanged: n,
+ *     flightChanges: [{id, name, dir, oldFlight, newFlight}]}
+ * A blank or unparseable Import time or terminal is never a change (it never blanks a Flights cell).
+ */
+function planImportChanges_(existingRows, incoming) {
+  var dirL = function (d) { return /^d/i.test(String(d || '')) ? 'D' : 'A'; };
+  var normF = function (s) { var f = normalizeFlight(s); return f ? f.flight : String(s || '').toUpperCase().replace(/[\s-]/g, ''); };
+  var who = function (s) { return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim(); };
+  var keyOf = function (name, flight, d) { return [who(name), normF(flight), d].join('|'); };
+  var active = function (v) { return !(v === false || /^(false|no|0)$/i.test(String(v))); };
+  var byKey = {}, inKeys = {}, seen = {};
+  existingRows.forEach(function (r) { var k = keyOf(r.name, r.flightRaw, dirL(r.direction)); if (!byKey[k]) byKey[k] = r; });
+  incoming.forEach(function (inc) { inKeys[keyOf(inc.name, inc.flight, dirL(inc.dir))] = true; });
+  var out = { add: [], updates: [], unchanged: 0, flightChanges: [] };
+  incoming.forEach(function (inc) {
+    var d = dirL(inc.dir), k = keyOf(inc.name, inc.flight, d);
+    if (seen[k]) return;                                                           // repeated Import line
+    seen[k] = true;
+    var r = byKey[k];
+    if (!r) {
+      out.add.push(inc);
+      existingRows.forEach(function (o) {
+        var ok = keyOf(o.name, o.flightRaw, d);
+        if (dirL(o.direction) !== d || who(o.name) !== who(inc.name) || !active(o.active) || inKeys[ok]) return;
+        out.flightChanges.push({ id: o.id || 'F' + o._row, name: inc.name, dir: d, oldFlight: normF(o.flightRaw), newFlight: normF(inc.flight) });
+      });
+      return;
+    }
+    var field = d === 'A' ? 'schedArrIn' : 'schedDepIn', changes = [];
+    var newMs = inc.when && typeof inc.when.getTime === 'function' && !isNaN(inc.when.getTime()) ? inc.when.getTime() : null;
+    var oldMs = parseIstInput(r[field]);
+    if (newMs != null && newMs !== oldMs) {
+      changes.push({ field: field, label: d === 'A' ? 'Sched Arr' : 'Sched Dep', value: inc.when,
+        from: oldMs != null ? istStamp_(oldMs) : String(r[field] || '').trim() || 'blank',
+        to: oldMs != null && istDateKey(oldMs) === istDateKey(newMs) ? fmtTimeIST(newMs) : istStamp_(newMs) });
+    }
+    var nt = normTerminal_(inc.terminal), ot = normTerminal_(r.terminal);
+    if (nt && nt !== ot) changes.push({ field: 'terminal', label: 'Terminal', value: String(inc.terminal).trim(), from: ot || 'blank', to: nt });
+    if (!changes.length) out.unchanged++;
+    changes.forEach(function (c) { out.updates.push(Object.assign({ row: r._row, id: r.id || 'F' + r._row, name: r.name, dir: d }, c)); });
+  });
+  return out;
+}
+
+function istStamp_(ms) { return istDateKey(ms) + ' ' + fmtTimeIST(ms); }
+
+/** '2', 'T2', 't 2', 'Terminal 2' -> 'T2'; anything else upper-cased; blank -> ''. */
+function normTerminal_(t) {
+  var s = String(t == null ? '' : t).trim().toUpperCase().replace(/\s+/g, ' ');
+  var m = s.match(/^(?:T|TERMINAL)?\s*(\d)$/);
+  return m ? 'T' + m[1] : s;
+}
+
+/** Pure: plan -> the dialog text, one line per change. */
+function describeImportChanges_(plan) {
+  var dirWord = function (d) { return d === 'D' ? 'departure' : 'arrival'; };
+  return plan.updates.map(function (u) {
+    return 'Row ' + u.id + ' ' + u.name + ' ' + dirWord(u.dir) + ': ' + u.label + ' ' + u.from + ' → ' + u.to;
+  }).concat(plan.flightChanges.map(function (c) {
+    return 'Possible flight change: ' + c.name + ' ' + dirWord(c.dir) + ' ' + c.oldFlight + ' (row ' + c.id + ', active) vs ' + c.newFlight +
+      ' in Import. A new row was added for ' + c.newFlight + '; untick Active on row ' + c.id + ' if the old flight is no longer used.';
+  })).join('\n');
 }
 
 /** Date cell + time cell (or a single datetime cell, or text) -> Date in IST, or '' if unparseable. */

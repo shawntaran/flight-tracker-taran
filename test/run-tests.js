@@ -798,6 +798,77 @@ test('the menu points "Run a check now" at runCheckNow; the trigger handler stay
   assert.ok(/newTrigger\('tick'\)/.test(src));
 });
 
+console.log('import changes propagate (planImportChanges_)');
+function importCtx() {
+  const c = freshCtx();
+  const at = (s) => new Date(c.parseIstInput(s));
+  const ex = (o) => Object.assign({ _row: 2, id: 'F2', name: 'Dr X', direction: 'Arrival', flightRaw: 'EK 568', schedArrIn: '2026-10-25 04:50',
+    schedDepIn: '', terminal: 'T2', active: true }, o);
+  const inc = (o) => Object.assign({ name: 'Dr X', dir: 'Arrival', flight: 'EK568', when: at('2026-10-25 04:50'), terminal: '2' }, o);
+  return { c, at, ex, inc };
+}
+test('a changed time is listed (old → new) with the Date to write; nothing is added', () => {
+  const { c, at, ex, inc } = importCtx();
+  const p = c.planImportChanges_([ex({ id: 'F12' })], [inc({ when: at('2026-10-25 06:10') })]);
+  assert.deepStrictEqual([p.add.length, p.unchanged, p.flightChanges.length, p.updates.length], [0, 0, 0, 1]);
+  assert.deepStrictEqual([p.updates[0].field, p.updates[0].from, p.updates[0].to, p.updates[0].row], ['schedArrIn', '2026-10-25 04:50', '06:10', 2]);
+  assert.strictEqual(p.updates[0].value.getTime(), c.parseIstInput('2026-10-25 06:10'));
+  assert.strictEqual(c.describeImportChanges_(p), 'Row F12 Dr X arrival: Sched Arr 2026-10-25 04:50 → 06:10');
+});
+test('a changed terminal is listed; "2" and "T2" are the same terminal (unchanged)', () => {
+  const { c, ex, inc } = importCtx();
+  const p = c.planImportChanges_([ex({ terminal: 'T1' })], [inc({ terminal: 'Terminal 2' })]);
+  assert.deepStrictEqual(plain(p.updates.map((u) => [u.field, u.from, u.to, u.value])), [['terminal', 'T1', 'T2', 'Terminal 2']]);
+  const same = c.planImportChanges_([ex()], [inc()]);
+  assert.deepStrictEqual([same.updates.length, same.unchanged, same.add.length], [0, 1, 0]);
+});
+test('a flight-number change adds the new row and lists the old one; nothing is deactivated', () => {
+  const { c, ex, inc } = importCtx();
+  const p = c.planImportChanges_([ex({ id: 'F7', name: 'Dr Y' })], [inc({ name: 'Dr Y', flight: 'EK 566' })]);
+  assert.strictEqual(p.add.length, 1);
+  assert.deepStrictEqual(plain(p.flightChanges), [{ id: 'F7', name: 'Dr Y', dir: 'A', oldFlight: 'EK568', newFlight: 'EK566' }]);
+  assert.strictEqual(p.updates.length, 0, 'the old row is never touched');
+  assert.ok(/^Possible flight change: Dr Y arrival EK568 \(row F7, active\) vs EK566 in Import/.test(c.describeImportChanges_(p)));
+  assert.strictEqual(c.planImportChanges_([ex({ name: 'Dr Y', active: false })], [inc({ name: 'Dr Y', flight: 'EK566' })]).flightChanges.length, 0, 'inactive old row: not listed');
+  assert.strictEqual(c.planImportChanges_([ex({ name: 'Dr Y' })], [inc({ name: 'Dr Y' }), inc({ name: 'Dr Y', flight: 'EK566' })]).flightChanges.length, 0,
+    'old flight still in Import: a second flight, not a change');
+});
+test('the same person with an arrival and a departure: each compared on its own', () => {
+  const { c, at, ex, inc } = importCtx();
+  const rows = [ex(), ex({ _row: 3, id: 'F3', direction: 'Departure', flightRaw: 'EK 569', schedArrIn: '', schedDepIn: '2026-10-28 09:30' })];
+  const p = c.planImportChanges_(rows, [inc(), inc({ dir: 'Departure', flight: 'EK569', when: at('2026-10-29 09:30') })]);
+  assert.deepStrictEqual(plain(p.updates.map((u) => [u.id, u.field, u.from, u.to])), [['F3', 'schedDepIn', '2026-10-28 09:30', '2026-10-29 09:30']]);
+  assert.deepStrictEqual([p.unchanged, p.flightChanges.length, p.add.length], [1, 0, 0]);
+});
+test('an unparseable or blank Import time or terminal is never a change to blank', () => {
+  const { c, ex, inc } = importCtx();
+  const p = c.planImportChanges_([ex()], [inc({ when: '', terminal: '' })]);
+  assert.deepStrictEqual([p.updates.length, p.unchanged], [0, 1]);
+  const filled = c.planImportChanges_([ex({ schedArrIn: '' })], [inc()]);
+  assert.deepStrictEqual(plain(filled.updates.map((u) => [u.from, u.to])), [['blank', '2026-10-25 04:50']], 'a blank Flights time is filled');
+});
+test('importTravelDetails: YES writes only coordinator input cells; the summary has all four counts', () => {
+  const c = freshCtx(), writes = [], alerts = [];
+  const flights = [{ _row: 2, id: 'F2', name: 'Dr X', direction: 'Arrival', flightRaw: 'EK568', schedArrIn: '2026-10-25 04:50', terminal: 'T2', active: true },
+    { _row: 3, id: 'F3', name: 'Dr Y', direction: 'Arrival', flightRaw: 'QR572', schedArrIn: '2026-10-25 05:00', terminal: 'T2', active: true }];
+  const importValues = [['Name', 'Phone', 'Arrival Flight', 'Arrival Date', 'Arrival Time', 'Arrival Terminal'],
+    ['Dr X', '+91 1', 'EK 568', '2026-10-25', '06:10', 'T2'], ['Dr Y', '', 'QR 574', '2026-10-25', '05:00', 'T2'], ['Dr Z', '', 'AI 176', '2026-10-26', '07:00', '1']];
+  const flightsSheet = { getLastRow: () => 3, getRange: (r, col, nr, nc) => ({ setValues: (v) => writes.push(['setValues', r, col, nr, nc]), setValue: (v) => writes.push(['setValue', r, col, v && typeof v.getTime === 'function' ? 'Date' : v]) }) };
+  Object.assign(c, {
+    SpreadsheetApp: { getActive: () => ({ getSheetByName: (n) => (n === 'Import' ? { getLastRow: () => 4, getDataRange: () => ({ getValues: () => importValues }) } : flightsSheet) }),
+      getUi: () => ({ alert: (...a) => { alerts.push(a.filter((x) => typeof x === 'string').join(' | ')); return 'YES'; }, ButtonSet: { YES_NO: 1, OK: 2 }, Button: { YES: 'YES' } }) },
+    readFlights: () => flights.map((r) => Object.assign({}, r))
+  });
+  c.importTravelDetails();
+  const inputCols = new Set(c.COLS.map((col, i) => [col.kind, i + 1]).filter(([k]) => k === 'in').map(([, i]) => i));
+  const cellWrites = writes.filter((w) => w[0] === 'setValue');
+  assert.deepStrictEqual(cellWrites, [['setValue', 2, c.colIndex_('schedArrIn') + 1, 'Date']]);
+  assert.ok(cellWrites.every((w) => inputCols.has(w[2])), 'only input columns');
+  assert.deepStrictEqual(writes.filter((w) => w[0] === 'setValues'), [['setValues', 4, 1, 2, inputCols.size]], 'two new rows (QR574, AI176), input block only');
+  assert.ok(alerts.some((t) => /Row F2 Dr X arrival: Sched Arr 2026-10-25 04:50 → 06:10/.test(t) && /Possible flight change: Dr Y arrival QR572 \(row F3, active\) vs QR574/.test(t)), alerts.join('\n'));
+  assert.ok(/^Import finished: 2 added, 1 updated, 0 unchanged, 1 possible flight change\(s\)\./.test(alerts[alerts.length - 1]), alerts[alerts.length - 1]);
+});
+
 console.log('heartbeat (Status tab)');
 function statusSheetFake(c, opts) {
   const writes = [], logs = [];
