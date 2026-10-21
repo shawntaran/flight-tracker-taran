@@ -28,9 +28,9 @@ function getGroupingBundle() {
 
 const defaultPort = parseInt(process.env.PORT || '3000', 10);
 
-// Live data for the preview: the tracker's Flights/Groups/Status tabs (PREVIEW_SOURCE=import: the Import tab),
+// Live data for the preview: the tracker's data in Supabase (PREVIEW_SOURCE=import: the Import columns),
 // read server-side (see tools/sheet-source.js). Built lazily so the server still starts, and ?mock=1 still
-// works, without the local assistant's Google setup. fresh: a click on Refresh skips the 60 s cache.
+// works, without the local assistant's Supabase setup. fresh: a click on Refresh skips the 60 s cache.
 let sheetSource = null;
 function getSheetData(fresh) {
   try {

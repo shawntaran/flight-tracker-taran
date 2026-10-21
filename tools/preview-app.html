@@ -193,7 +193,7 @@
     <div class="flex flex-col min-w-0">
       <span id="page-title" class="font-headline-sm text-headline-sm text-primary leading-tight">Flight Operations</span>
       <span id="page-subtitle" class="font-body-sm text-body-sm text-on-surface-variant hidden sm:inline truncate">Monitor arrivals, departures, and airport transfers</span>
-      <!-- Where this data comes from (always visible): the tracked Flights tab, or Import-tab schedules only -->
+      <!-- Where this data comes from (always visible): the tracked flights table, or Import-column schedules only -->
       <span id="data-source-line" class="font-data-mono text-[10px] leading-tight text-on-surface-variant truncate"></span>
     </div>
     <div class="flex items-center gap-space-md">
@@ -959,7 +959,7 @@
     $('engine-dot').className = 'w-2 h-2 rounded-full ' + (n === 1 ? 'bg-on-tertiary-container animate-pulse' : n > 1 ? 'bg-error' : 'bg-outline');
     $('engine-label').textContent = n == null ? 'Engine status unknown' : n === 1 ? 'Engine Active' : n > 1 ? n + ' triggers (duplicate)' : 'Engine stopped';
     $('sync-label').textContent = d.preview ? 'Mock data (local preview)' : d.source ? 'Live: ' + d.source : on ? 'Live Syncing (OpenSky / ADB)' : 'Tracking stopped';
-    $('preview-badge').textContent = d.preview ? '⚗ Local Preview · Mock Data' : '⚗ Local Preview · Sheet Data';
+    $('preview-badge').textContent = d.preview ? '⚗ Local Preview · Mock Data' : '⚗ Local Preview · Supabase Data';
     $('sync-dot').className = 'w-1.5 h-1.5 rounded-full ' + (on ? 'bg-on-tertiary-container' : 'bg-outline');
     $('trigger-note').textContent = n == null ? '' : on ? 'Trigger installed' : 'Start tracking from the sheet menu';
   }
@@ -2379,7 +2379,7 @@
     return { line: 'Tracker last ran ' + hm(lt.at) + ' IST (' + (ago < 1 ? 'just now' : dur(ago) + ' ago') + ')' + (lt.result === 'error' ? ', failed' : ''), warn: warns.join(' ') };
   }
   function renderHeartbeat(d) {
-    var tracked = d && !d.preview && /Flights tab/.test(d.source || '');
+    var tracked = d && !d.preview && /\(tracked\)/.test(d.source || '');
     var v = tracked ? heartbeatView(d.lastTick, Date.now()) : { line: '', warn: '' };
     $('data-source-line').textContent = 'Data: ' + (!d ? '' : d.preview ? 'mock data (local preview)' : d.source || 'unknown source') + (v.line ? ' · ' + v.line : '');
     $('hb-banner').textContent = v.warn;

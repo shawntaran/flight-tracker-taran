@@ -1,25 +1,26 @@
 'use strict';
-// Local preview data source: the tracker's own tabs (Flights, Groups, Config, Status), the same data the
-// Telegram assistant reads (local-assistant/src/snapshot.js). Read server-side with the local assistant's
-// read-only OAuth token (spreadsheets.readonly, GET only); no credential reaches the browser.
+// Local preview data source: the tracker's data in Supabase (the `flights` table, plus `groups`, `config` and
+// `status` tables if they exist), the same data the Telegram assistant reads (local-assistant/src/snapshot.js).
+// Read server-side with the anon key (local-assistant/src/supabase.js, select only); no key reaches the browser.
+// supabase.js hands the rows over in the old sheet-tab shape (header row + value rows), so the mappers below
+// are unchanged and "tab" still names the sheet each table was imported from.
 //
 // The payload has the shape of buildDashboardData_ in src/Dashboard.js, plus `source` and `lastTick`.
 // Columns are found by HEADER NAME (COLS in src/Sheet.js). Only an allowlist is copied: Phone, Email,
 // Telegram Chat ID, Notes, Driver Telegram Chat ID and Member IDs are never read into the payload.
 //
-// PREVIEW_SOURCE=import (local-assistant/.env.local-assistant) reads the Import tab instead. With the
-// default (flights), a missing or empty Flights tab falls back to the Import tab, with an entry in errors[].
+// PREVIEW_SOURCE=import (local-assistant/.env.local-assistant) reads the Import tab's columns instead. With the
+// default (flights), a table without the tracker's columns falls back to the Import columns, with an entry in errors[].
 
-const path = require('path');
 const { parseTime } = require('../local-assistant/src/time');
 const { mapImportRows, normFlight } = require('./import-source');
 
 const CACHE_MS = 60 * 1000;        // the 5-minute auto-refresh is served from this
 const FRESH_MIN_MS = 5 * 1000;     // ?fresh=1 (a click on Refresh): at most one real read per 5 s
 const ATTRIBUTION = 'Flight status data: AeroDataBox (https://aerodatabox.com)'; // = ADB_ATTRIBUTION (tested)
-const SOURCE_FLIGHTS = 'Google Sheets · Flights tab (tracked)';
-const SOURCE_IMPORT = 'Google Sheets · Import tab (schedule only)';
-const FALLBACK_NOTE = 'Flights tab empty or missing: showing Import-tab schedules only, no live status';
+const SOURCE_FLIGHTS = 'Supabase · flights table (tracked)';
+const SOURCE_IMPORT = 'Supabase · flights table, Import columns (schedule only)';
+const FALLBACK_NOTE = 'flights table empty or without the tracker\'s columns: showing Import-column schedules only, no live status';
 const USAGE_NOTE = 'Not available in the local preview (Apps Script only).';
 const FINAL = { ARR: { LANDED: 1, CANCELLED: 1, DIVERTED: 1 }, DEP: { DEPARTED: 1, CANCELLED: 1, DIVERTED: 1 } }; // = Tracker.FINAL
 
@@ -108,7 +109,7 @@ function payload(now, conf, source, flights, groups, errors, lastTick) {
 
 /**
  * opts: {readRange: async (tab) => {rows}|{missing:true}, previewSource, now, redact} for tests; with no
- * readRange the local assistant's config and read-only Google client are used.
+ * readRange the local assistant's config and read-only Supabase client are used.
  * -> async getDashboardData({fresh}) . fresh skips the 60 s cache (one real read per 5 s at most).
  */
 function createSheetSource(opts) {
@@ -116,24 +117,19 @@ function createSheetSource(opts) {
   let readRange = o.readRange, previewSource = o.previewSource, redact = o.redact || ((s) => String(s));
   if (!readRange) {
     const { loadConfig } = require('../local-assistant/src/config');
-    const { createGoogle } = require('../local-assistant/src/google');
+    const { createSupabase } = require('../local-assistant/src/supabase');
     const { makeRedactor } = require('../local-assistant/src/redact');
     const { config } = loadConfig(o.envFile);
-    redact = makeRedactor([config.google.clientSecret, config.tgToken, config.llm.apiKey]);
-    const google = createGoogle({ clientId: config.google.clientId, clientSecret: config.google.clientSecret,
-      tokenFile: path.join(config.stateDir, 'google-token.json'), fetch: o.fetch || fetch, redact });
+    redact = makeRedactor([config.supabase.anonKey, config.tgToken, config.llm.apiKey]);
     previewSource = config.previewSource;
-    readRange = (tab) => {
-      if (!config.spreadsheetId) throw new Error('GOOGLE_SPREADSHEET_ID is not set in local-assistant/.env.local-assistant');
-      return google.readRange(config.spreadsheetId, tab);
-    };
+    readRange = createSupabase({ url: config.supabase.url, anonKey: config.supabase.anonKey, redact }).readRange;
   }
   const now = o.now || (() => Date.now());
   let cache = null, lastRead = -Infinity;
 
   async function readImport(t, conf, errors) {
     const r = await readRange('Import');
-    if (r.missing) throw new Error('The spreadsheet has no "Import" tab' + (errors.length ? ' (' + errors[0] + ')' : ''));
+    if (r.missing) throw new Error('Supabase has no "flights" table' + (errors.length ? ' (' + errors[0] + ')' : ''));
     const m = mapImportRows(r.rows, t, conf.homeAirport);
     return payload(t, conf, SOURCE_IMPORT, m.flights, [], errors.concat(m.errors), null);
   }

@@ -1,9 +1,9 @@
 'use strict';
-// Local preview data source: the spreadsheet's "Import" tab, read server-side with the local assistant's
-// read-only OAuth token (spreadsheets.readonly). The sheet stays private and no credential reaches the browser.
+// Local preview data source: the Import tab's columns (name, arrival/departure flight, date, time, terminal),
+// now read from the Supabase `flights` table server-side with the anon key (local-assistant/src/supabase.js,
+// select only). No key reaches the browser. supabase.js returns the rows in the old Import-tab shape (header
+// row + value rows), so mapImportRows is unchanged.
 // One Import row (one person) becomes up to two dashboard flights: an arrival and a departure.
-
-const path = require('path');
 
 const IMPORT_TAB = 'Import';
 const CACHE_MS = 60 * 1000;
@@ -70,29 +70,27 @@ function mapImportRows(rows, nowMs, homeAirport) {
   return { flights, errors };
 }
 
-/** Reads the Import tab through local-assistant's config and token; caches for a minute. */
+/** Reads the Import columns from Supabase through local-assistant's config; caches for a minute. */
 function createImportSource(opts) {
   const o = opts || {};
   const { loadConfig } = require('../local-assistant/src/config');
-  const { createGoogle } = require('../local-assistant/src/google');
+  const { createSupabase } = require('../local-assistant/src/supabase');
   const { makeRedactor } = require('../local-assistant/src/redact');
   const { config } = loadConfig(o.envFile);
-  const redact = makeRedactor([config.google.clientSecret, config.tgToken, config.llm.apiKey]);
-  const google = createGoogle({ clientId: config.google.clientId, clientSecret: config.google.clientSecret,
-    tokenFile: path.join(config.stateDir, 'google-token.json'), fetch: o.fetch || fetch, redact });
+  const redact = makeRedactor([config.supabase.anonKey, config.tgToken, config.llm.apiKey]);
+  const supabase = createSupabase({ url: config.supabase.url, anonKey: config.supabase.anonKey, redact, client: o.client });
   const home = o.homeAirport || 'BLR';
   let cache = null;
 
   return async function getDashboardData() {
     const now = Date.now();
     if (cache && now - cache.at < CACHE_MS) return cache.data;
-    if (!config.spreadsheetId) throw new Error('GOOGLE_SPREADSHEET_ID is not set in local-assistant/.env.local-assistant');
-    const r = await google.readRange(config.spreadsheetId, IMPORT_TAB);
-    if (r.missing) throw new Error('The spreadsheet has no tab named "' + IMPORT_TAB + '"');
+    const r = await supabase.readRange(IMPORT_TAB);
+    if (r.missing) throw new Error('Supabase has no "flights" table');
     const m = mapImportRows(r.rows, now, home);
     const data = {
-      generatedAt: now, preview: false, source: 'Google Sheets · ' + IMPORT_TAB + ' tab', homeAirport: home, maxSeats: 4,
-      attribution: 'Schedules from the "' + IMPORT_TAB + '" tab. No live flight status in the local preview.',
+      generatedAt: now, preview: false, source: 'Supabase · flights table, Import columns', homeAirport: home, maxSeats: 4,
+      attribution: 'Schedules from the Supabase flights table. No live flight status in the local preview.',
       flights: m.flights, groups: [], log: [], tickTriggers: null, usage: null,
       usageError: 'Not available in the local preview (Apps Script only).', errors: m.errors, assistant: { enabled: false }
     };

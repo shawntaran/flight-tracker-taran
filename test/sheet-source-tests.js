@@ -1,5 +1,5 @@
 // Local preview data source (tools/sheet-source.js): the tracker's Flights/Groups/Config/Status tabs mapped to
-// the dashboard contract. No network: the Google reader is faked. Run: node test/sheet-source-tests.js
+// the dashboard contract. No network: the data reader (and the Supabase client) is faked. Run: node test/sheet-source-tests.js
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -174,6 +174,41 @@ test('the preview server passes ?fresh=1 through and the bridge sends it only fo
   assert.ok(/opts && opts\.fresh \? '\?fresh=1' : ''/.test(bridge));
   assert.ok(/\[data-refresh\]'\)\.forEach\(function \(b\) \{ b\.addEventListener\('click', function \(\) \{ load\(true\); \}\); \}\)/.test(page));
   assert.ok(/setInterval\(function \(\) \{ if \(!document\.hidden\) load\(\); \}, REFRESH_MS\)/.test(page), 'auto-refresh keeps the cache');
+});
+
+console.log('Supabase (local-assistant/src/supabase.js -> the same payload)');
+const { createSupabase } = require(path.join(ROOT, 'local-assistant', 'src', 'supabase.js'));
+/** A sheet tab -> Supabase row objects as an import returns them: '' -> null, an extra id/created_at column. */
+const sbObjects = (tab, names) => tab.slice(1).map((r, i) => Object.assign({ created_at: '2026-10-01T00:00:00+00:00' },
+  Object.fromEntries(tab[0].map((h, j) => [names(h), r[j] === '' || r[j] == null ? null : r[j]]))));
+const snake = (h) => h.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+const fakeSupabase = (tables) => ({ from: (t) => ({ select: () => ({ abortSignal: async () => (t in tables ? { data: tables[t], error: null }
+  : { data: null, error: { code: 'PGRST205', message: "Could not find the table 'public." + t + "'" } }) }) }) });
+function supabaseSource(tables, opts) {
+  const { readRange } = createSupabase({ client: fakeSupabase(tables) });
+  return { get: S.createSheetSource(Object.assign({ readRange, redact, now: () => NOW, previewSource: 'flights' }, opts || {})) };
+}
+for (const [what, names] of [['verbatim sheet headers', (h) => h], ['snake_case columns', snake]]) {
+  test('Supabase tables with ' + what + ' give exactly the payload the sheet tabs gave', async () => {
+    const tabs = fullTabs();
+    const want = await source(tabs).get();
+    const got = await supabaseSource({ flights: sbObjects(tabs.Flights, names), groups: sbObjects(GROUPS, names),
+      config: sbObjects(CONFIG, names), status: sbObjects(STATUS, names) }).get();
+    assert.deepStrictEqual(got, want);
+  });
+}
+test('only a flights table: tracked flights, no groups, the "no heartbeat" warning (lastTick null), no errors', async () => {
+  const d = await supabaseSource({ flights: sbObjects(fullTabs().Flights, snake) }).get();
+  assert.deepStrictEqual([d.source, d.flights.length, d.groups, d.lastTick, d.errors], [S.SOURCE_FLIGHTS, 2, [], null, []]);
+});
+test('a flights table holding the Import columns falls back to Import schedules, never silently', async () => {
+  const d = await supabaseSource({ flights: sbObjects(IMPORT, snake) }).get();
+  assert.deepStrictEqual([d.source, d.errors[0], d.flights.map((f) => [f.name, f.flight, f.dir])], [S.SOURCE_IMPORT, S.FALLBACK_NOTE, [['Dr. Import', 'EK569', 'ARR']]]);
+  const i = await supabaseSource({ flights: sbObjects(IMPORT, (h) => h) }, { previewSource: 'import' }).get();
+  assert.deepStrictEqual([i.source, i.errors], [S.SOURCE_IMPORT, []]);
+});
+test('no flights table at all is an error the page shows, not an empty dashboard', async () => {
+  await assert.rejects(supabaseSource({}).get(), /no "flights" table/);
 });
 
 Promise.all(pending).then(() => {

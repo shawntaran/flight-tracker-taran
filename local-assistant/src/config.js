@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ENV_FILE = path.join(__dirname, '..', '.env.local-assistant');
-const KEYS = ['TG_BOT_TOKEN', 'ALLOWED_CHAT_IDS', 'GOOGLE_SPREADSHEET_ID', 'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET',
+const KEYS = ['TG_BOT_TOKEN', 'ALLOWED_CHAT_IDS', 'SUPABASE_URL', 'SUPABASE_ANON_KEY',
   'LLM_BASE_URL', 'LLM_MODEL', 'LLM_API_KEY', 'LLM_TIMEOUT_MS', 'STATE_DIR', 'RATE_LIMIT_PER_MIN', 'MAX_QUESTION_CHARS',
   'PREVIEW_SOURCE'];
 const PLACEHOLDER_MODEL = 'your-model-name';
@@ -41,9 +41,23 @@ function buildConfig(raw) {
     problems.push({ level: 'warn', key: 'ALLOWED_CHAT_IDS', message: 'empty: setup mode. Nobody gets tracker answers; ' +
       'message the bot privately and it replies with your chat id. Add the ids here, then restart' });
   }
-  need('GOOGLE_SPREADSHEET_ID', 'the id in the tracker spreadsheet URL');
-  need('GOOGLE_OAUTH_CLIENT_ID', 'Google Cloud OAuth client (Desktop app)');
-  need('GOOGLE_OAUTH_CLIENT_SECRET', 'Google Cloud OAuth client (Desktop app)');
+  need('SUPABASE_URL', 'the Project URL from Supabase (Project Settings -> API)');
+  need('SUPABASE_ANON_KEY', 'the anon / publishable key from Supabase (Project Settings -> API)');
+  let supabaseUrl = get('SUPABASE_URL');
+  if (supabaseUrl) {
+    try {
+      const u = new URL(supabaseUrl);
+      if (!/^https?:$/.test(u.protocol)) throw new Error('protocol');
+      supabaseUrl = u.toString().replace(/\/+$/, '');
+    } catch (e) {
+      problems.push({ level: 'error', key: 'SUPABASE_URL', message: 'not a valid http(s) URL' });
+      supabaseUrl = '';
+    }
+  }
+  if (isSecretSupabaseKey(get('SUPABASE_ANON_KEY'))) {
+    problems.push({ level: 'error', key: 'SUPABASE_ANON_KEY', message: 'this is a service-role / secret key, which bypasses ' +
+      'row-level security; use the anon / publishable key' });
+  }
 
   const allowed = new Set();
   get('ALLOWED_CHAT_IDS').split(',').map((s) => s.trim()).filter(Boolean).forEach((id) => {
@@ -74,15 +88,15 @@ function buildConfig(raw) {
   llm.enabled = !!(url && llm.model);
   if (url) endpointSafety(url, !!llm.apiKey).forEach((p) => problems.push(p));
 
-  // Local preview dashboard only (tools/sheet-source.js): which tab it reads. The bot itself always reads Flights.
+  // Local preview dashboard only (tools/sheet-source.js): which columns it reads. The bot itself always reads Flights.
   const previewRaw = get('PREVIEW_SOURCE').toLowerCase();
   if (previewRaw && previewRaw !== 'flights' && previewRaw !== 'import') {
     problems.push({ level: 'warn', key: 'PREVIEW_SOURCE', message: 'must be "flights" or "import"; using flights' });
   }
 
   const config = {
-    tgToken: get('TG_BOT_TOKEN'), allowedChatIds: allowed, spreadsheetId: get('GOOGLE_SPREADSHEET_ID'),
-    google: { clientId: get('GOOGLE_OAUTH_CLIENT_ID'), clientSecret: get('GOOGLE_OAUTH_CLIENT_SECRET') },
+    tgToken: get('TG_BOT_TOKEN'), allowedChatIds: allowed,
+    supabase: { url: supabaseUrl, anonKey: get('SUPABASE_ANON_KEY') },
     llm,
     stateDir: get('STATE_DIR') || path.join(__dirname, '..', '.state'),
     rateLimitPerMin: intIn(get('RATE_LIMIT_PER_MIN'), 6, 1, 60),
@@ -91,6 +105,14 @@ function buildConfig(raw) {
     pollTimeoutS: 25, snapshotTtlMs: 60 * 1000, maxMessageAgeMin: 30
   };
   return { config, problems };
+}
+
+/** sb_secret_... keys, or a legacy JWT whose role is service_role. */
+function isSecretSupabaseKey(k) {
+  if (/^sb_secret_/.test(k)) return true;
+  const part = k.split('.')[1];
+  if (!part) return false;
+  try { return JSON.parse(Buffer.from(part, 'base64').toString('utf8')).role === 'service_role'; } catch (e) { return false; }
 }
 
 const isLoopback = (h) => h === 'localhost' || h === '::1' || h === '[::1]' || /^127\./.test(h);
@@ -113,12 +135,15 @@ function endpointSafety(url, hasKey) {
   return out;
 }
 
+const hostOf = (u) => { try { return new URL(u).host; } catch (e) { return '(invalid URL)'; } };
+
 /** Secret-free description for health output. */
 function describe(config) {
   let host = '(invalid URL)';
   try { const u = new URL(config.llm.baseUrl); host = u.protocol + '//' + u.host; } catch (e) { /* invalid */ }
   return { modelEndpoint: host, model: config.llm.model || '(not set)', apiKey: config.llm.apiKey ? 'set' : 'not set',
-    allowedChats: config.allowedChatIds.size, spreadsheet: config.spreadsheetId ? 'set' : 'not set',
+    allowedChats: config.allowedChatIds.size, supabase: config.supabase.url ? hostOf(config.supabase.url) : 'not set',
+    supabaseKey: config.supabase.anonKey ? 'set' : 'not set',
     telegramToken: config.tgToken ? 'set' : 'not set', stateDir: config.stateDir };
 }
 

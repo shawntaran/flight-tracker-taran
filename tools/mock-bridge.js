@@ -21,7 +21,7 @@
     return p.weekday + ' ' + p.day + ' ' + p.month + ' ' + p.hour + ':' + p.minute;
   }
 
-  // Live sheet data by default; add ?mock=1 to the URL for the synthetic data below.
+  // Live Supabase data by default; add ?mock=1 to the URL for the synthetic data below.
   var USE_MOCK = /[?&]mock=1\b/.test(location.search);
 
   // Preview-only ETA overrides so the page can be shown reordering after a refresh. id -> ms | null | any value.

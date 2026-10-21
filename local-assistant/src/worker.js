@@ -1,5 +1,5 @@
 'use strict';
-// The polling loop. Read-only: it reads the tracker sheet and replies to allowed chats; it never writes
+// The polling loop. Read-only: it reads the tracker data (Supabase) and replies to allowed chats; it never writes
 // anywhere except its own offset file. Every failure is logged (redacted) and the loop keeps going.
 
 const { answer } = require('./answers');
@@ -8,22 +8,22 @@ const { fmtIST } = require('./time');
 
 const UNAUTHORISED_REPLY_EVERY_MS = 24 * 60 * 60 * 1000;
 
-/** Sheet snapshot with a short cache. If a refresh fails, the last good snapshot is reused and labelled. */
-function createSnapshotSource({ readRange, spreadsheetId, now, ttlMs, log }) {
+/** Tracker snapshot with a short cache. If a refresh fails, the last good snapshot is reused and labelled. */
+function createSnapshotSource({ readRange, now, ttlMs, log }) {
   let cache = null;
   return async function getSnapshot() {
     const t = now();
     if (cache && t - cache.readAt < ttlMs) return cache;
     const read = async (name) => {
-      try { return await readRange(spreadsheetId, name); } catch (e) { return { error: (e && e.message) || String(e) }; }
+      try { return await readRange(name); } catch (e) { return { error: (e && e.message) || String(e) }; }
     };
     const raw = { flights: await read('Flights'), groups: await read('Groups'), config: await read('Config'), status: await read('Status') };
     if (raw.flights.error && cache) {
-      log('WARN', 'Sheet refresh failed, using data read at ' + fmtIST(cache.readAt) + ': ' + raw.flights.error);
+      log('WARN', 'Supabase refresh failed, using data read at ' + fmtIST(cache.readAt) + ': ' + raw.flights.error);
       return Object.assign({}, cache, { problems: ['tracker data could not be refreshed; it was read at ' + fmtIST(cache.readAt)].concat(cache.problems) });
     }
     const snap = buildSnapshot(raw, t);
-    if (snap.problems.length) log('WARN', 'Sheet: ' + snap.problems.join('; '));
+    if (snap.problems.length) log('WARN', 'Data: ' + snap.problems.join('; '));
     if (!raw.flights.error) cache = snap;
     return snap;
   };

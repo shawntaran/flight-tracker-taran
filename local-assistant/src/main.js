@@ -2,15 +2,14 @@
 'use strict';
 // Faculty Flight Tracker: local Telegram assistant.
 //   node local-assistant/src/main.js           start polling (npm run assistant)
-//   node local-assistant/src/main.js health    check config, Telegram, Google and the model; sends no message
-//   node local-assistant/src/main.js auth      one-time read-only Google authorisation
+//   node local-assistant/src/main.js health    check config, Telegram, Supabase and the model; sends no message
 
 const path = require('path');
 const { loadConfig, describe } = require('./config');
 const { makeRedactor, makeLogger } = require('./redact');
 const { createTelegram } = require('./telegram');
-const { createOffsetStore, readJson } = require('./state');
-const { createGoogle } = require('./google');
+const { createOffsetStore } = require('./state');
+const { createSupabase } = require('./supabase');
 const { createLlm } = require('./llm');
 const { createWorker, createSnapshotSource } = require('./worker');
 
@@ -19,22 +18,14 @@ let redactAll = makeRedactor([]);
 async function main() {
   const cmd = process.argv[2] || 'start';
   const { config, problems, file, fileFound } = loadConfig();
-  const redact = redactAll = makeRedactor([config.tgToken, config.llm.apiKey, config.google.clientSecret]);
+  const redact = redactAll = makeRedactor([config.tgToken, config.llm.apiKey, config.supabase.anonKey]);
   const log = makeLogger(redact);
   const print = (s) => console.log(redact(s));
   if (!fileFound) print('No config file at ' + file + '. Copy .env.local-assistant.example to .env.local-assistant and fill it in.');
   problems.forEach((p) => log(p.level === 'error' ? 'ERROR' : 'WARN', p.key + ': ' + p.message));
 
-  const tokenFile = path.join(config.stateDir, 'google-token.json');
-  const google = createGoogle({ clientId: config.google.clientId, clientSecret: config.google.clientSecret, tokenFile, fetch, redact });
+  const supabase = createSupabase({ url: config.supabase.url, anonKey: config.supabase.anonKey, redact });
   const llm = createLlm(Object.assign({}, config.llm, { fetch, redact }));
-
-  if (cmd === 'auth') {
-    if (!config.google.clientId || !config.google.clientSecret) { print('Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET first.'); process.exitCode = 1; return; }
-    await google.authorize({ print });
-    print('Saved a read-only Google token to ' + tokenFile + ' (git-ignored). Run "npm run assistant:health" next.');
-    return;
-  }
 
   const telegram = createTelegram({ token: config.tgToken, fetch, redact, timeoutMs: 15000 });
 
@@ -44,21 +35,23 @@ async function main() {
     print('Telegram: ' + (me.ok ? 'token accepted, bot @' + me.result.username : 'FAILED ' + me.error));
     let sheet;
     try {
-      const r = await google.readRange(config.spreadsheetId, 'Flights');
-      sheet = r.missing ? 'FAILED: no "Flights" sheet in that spreadsheet' : 'read-only access works (' + Math.max(0, r.rows.length - 1) + ' Flights rows)';
+      const r = await supabase.readRange('Flights');
+      const n = r.missing ? 0 : Math.max(0, r.rows.length - 1);
+      sheet = r.missing ? 'FAILED: the project has no "flights" table' : 'read access works (' + n + ' flights rows)' +
+        (n ? '' : '. If the table does hold rows, row-level security is hiding them: add a SELECT policy for the anon role');
     } catch (e) { sheet = 'FAILED ' + ((e && e.message) || e); }
-    print('Google Sheets: ' + sheet + (readJson(tokenFile) ? '' : ' (no token yet: run npm run assistant:auth)'));
+    print('Supabase: ' + sheet);
     const h = await llm.health();
     print('Model: endpoint ' + h.host + ', model ' + h.model + ', ' + (h.reachable ? 'reachable' : 'UNREACHABLE') + (h.detail ? ' (' + h.detail + ')' : ''));
     if (problems.some((p) => p.level === 'error') || !me.ok || /FAILED/.test(sheet)) process.exitCode = 1;
     return;
   }
 
-  if (cmd !== 'start') { print('Unknown command "' + cmd + '". Use: start | health | auth'); process.exitCode = 1; return; }
+  if (cmd !== 'start') { print('Unknown command "' + cmd + '". Use: start | health'); process.exitCode = 1; return; }
   if (problems.some((p) => p.level === 'error')) { print('Fix the configuration errors above, then start again.'); process.exitCode = 1; return; }
 
   const offsetStore = createOffsetStore(path.join(config.stateDir, 'telegram-offset.json'));
-  const getSnapshot = createSnapshotSource({ readRange: google.readRange, spreadsheetId: config.spreadsheetId, now: Date.now, ttlMs: config.snapshotTtlMs, log });
+  const getSnapshot = createSnapshotSource({ readRange: supabase.readRange, now: Date.now, ttlMs: config.snapshotTtlMs, log });
   const worker = createWorker({ config, telegram, offsetStore, getSnapshot, llm, log, now: Date.now,
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)) });
 

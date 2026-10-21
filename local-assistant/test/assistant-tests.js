@@ -1,4 +1,4 @@
-// Local Telegram assistant tests. Everything external is faked: no Telegram, Google or model server is contacted.
+// Local Telegram assistant tests. Everything external is faked: no Telegram, Supabase or model server is contacted.
 // Run: node local-assistant/test/assistant-tests.js
 'use strict';
 const fs = require('fs');
@@ -11,7 +11,8 @@ const { buildConfig, endpointSafety, describe, parseEnv } = require(path.join(SR
 const { makeRedactor, makeLogger } = require(path.join(SRC, 'redact'));
 const { createTelegram, ALLOWED } = require(path.join(SRC, 'telegram'));
 const { createOffsetStore } = require(path.join(SRC, 'state'));
-const { createGoogle, SCOPE } = require(path.join(SRC, 'google'));
+const { createSupabase, toRows, TABLES } = require(path.join(SRC, 'supabase'));
+const { parseTime } = require(path.join(SRC, 'time'));
 const { createLlm } = require(path.join(SRC, 'llm'));
 const { buildSnapshot } = require(path.join(SRC, 'snapshot'));
 const A = require(path.join(SRC, 'answers'));
@@ -20,11 +21,21 @@ const { createWorker, createSnapshotSource } = require(path.join(SRC, 'worker'))
 // Credential-shaped values are built from parts so the repository's secret scan never sees one.
 const FAKE_TG = '123456789' + ':AAFakeTokenForTestsOnly_abcdefghijklmnop';
 const FAKE_KEY = 'sk-' + 'fakeModelKeyForTests0123456789';
-const FAKE_SECRET = 'GOCSPX-' + 'fakeClientSecretForTests';
+const FAKE_ANON = 'sb_publishable_' + 'fakeAnonKeyForTests0123';
 const MIN = 60 * 1000;
 const NOW = Date.parse('2026-10-21T02:30:00Z'); // Wed 21 Oct 08:00 IST
 const iso = (ms) => new Date(ms).toISOString();
 const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ft-assistant-'));
+/** A sheet tab (header row first) -> Supabase row objects, as an import of it returns them ('' -> null). */
+const sbObjects = (tab, names) => tab.slice(1).filter((r) => Array.isArray(r) && r.length)
+  .map((r) => Object.fromEntries(tab[0].map((h, i) => [names(h), r[i] === '' || r[i] == null ? null : r[i]])));
+const snake = (h) => h.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+/** Fake supabase-js client: from(t).select(c).abortSignal(s) resolves {data, error}. */
+const fakeSupabase = (tables, calls, errors) => ({ from: (t) => ({ select: (c) => ({ abortSignal: async () => {
+  calls.push([t, c]);
+  if (errors && errors[t]) return { data: null, error: errors[t] };
+  return t in tables ? { data: tables[t], error: null } : { data: null, error: { code: 'PGRST205', message: "Could not find the table 'public." + t + "' in the schema cache" } };
+} }) }) });
 
 // ---------------------------------------------------------------- fixtures (header order differs from COLS on purpose)
 const FH = ['Status', 'Name', 'Phone', 'Email', 'Telegram Chat ID', 'Direction', 'Flight', 'Sched Arr (IST)', 'Sched Dep (IST)', 'Airport',
@@ -72,13 +83,13 @@ const section = (name) => tests.push([null, name]);
 
 // ---------------------------------------------------------------- configuration and the model endpoint
 section('configuration and model endpoint');
-const BASE = { TG_BOT_TOKEN: FAKE_TG, ALLOWED_CHAT_IDS: '111, -100500, abc', GOOGLE_SPREADSHEET_ID: 'sheet123',
-  GOOGLE_OAUTH_CLIENT_ID: 'client.apps.googleusercontent.com', GOOGLE_OAUTH_CLIENT_SECRET: FAKE_SECRET };
+const BASE = { TG_BOT_TOKEN: FAKE_TG, ALLOWED_CHAT_IDS: '111, -100500, abc', SUPABASE_URL: 'https://abcdefghijkl.supabase.co', SUPABASE_ANON_KEY: FAKE_ANON };
 test('the example config parses; local Ollama default; placeholder model disables the model, not the worker', () => {
   const ex = parseEnv(fs.readFileSync(path.join(__dirname, '..', '.env.local-assistant.example'), 'utf8'));
-  ['TG_BOT_TOKEN', 'ALLOWED_CHAT_IDS', 'GOOGLE_SPREADSHEET_ID', 'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET',
+  ['TG_BOT_TOKEN', 'ALLOWED_CHAT_IDS', 'SUPABASE_URL', 'SUPABASE_ANON_KEY',
     'LLM_BASE_URL', 'LLM_MODEL', 'LLM_API_KEY', 'LLM_TIMEOUT_MS'].forEach((k) => assert.ok(k in ex, k));
-  assert.ok(!ex.TG_BOT_TOKEN && !ex.LLM_API_KEY && !ex.GOOGLE_OAUTH_CLIENT_SECRET, 'example holds no secrets');
+  assert.ok(!ex.TG_BOT_TOKEN && !ex.LLM_API_KEY && !ex.SUPABASE_ANON_KEY, 'example holds no secrets');
+  assert.ok(!Object.keys(ex).some((k) => /^GOOGLE_/.test(k)), 'no Google Sheets settings left');
   const { config, problems } = buildConfig(Object.assign({}, ex, BASE));
   assert.strictEqual(config.llm.baseUrl, 'http://127.0.0.1:11434/v1');
   assert.strictEqual(config.llm.enabled, false);
@@ -107,7 +118,7 @@ test('switching to a DGX/remote endpoint needs only LLM_BASE_URL, LLM_MODEL and 
   const h = await llm.health();
   assert.deepStrictEqual([h.host, h.model, h.reachable, h.modelListed], ['https://dgx.university.example', 'meta/llama-3.1-70b-instruct', true, true]);
   const shown = JSON.stringify(h) + JSON.stringify(describe(dgx.config));
-  assert.ok(!shown.includes(FAKE_KEY) && !shown.includes(FAKE_TG) && !shown.includes(FAKE_SECRET), shown);
+  assert.ok(!shown.includes(FAKE_KEY) && !shown.includes(FAKE_TG) && !shown.includes(FAKE_ANON), shown);
   assert.strictEqual(dgx.config.llm.timeoutMs, 45000);
 });
 test('endpoint safety: loopback and private networks pass; public or unencrypted endpoints are flagged', () => {
@@ -156,8 +167,8 @@ test('missing or unreadable sheets become problems, never exceptions', async () 
 test('snapshot source: a failed refresh reuses the last good data, labelled with its age', async () => {
   let fail = false, t = NOW;
   const logs = [];
-  const get = createSnapshotSource({ spreadsheetId: 's', now: () => t, ttlMs: 60000, log: (l, m) => logs.push(m),
-    readRange: async (id, name) => { if (fail) throw new Error('HTTP 500'); return RAW[name.toLowerCase()]; } });
+  const get = createSnapshotSource({ now: () => t, ttlMs: 60000, log: (l, m) => logs.push(m),
+    readRange: async (name) => { if (fail) throw new Error('HTTP 500'); return RAW[name.toLowerCase()]; } });
   assert.strictEqual((await get()).flights.length, 10);
   fail = true; t += 2 * MIN;
   const s = await get();
@@ -345,11 +356,11 @@ test('the worker never crashes: Telegram, sheet and send failures are logged and
 
 // ---------------------------------------------------------------- secrets and read-only guarantees
 section('secrets and read-only guarantees');
-test('redaction masks the bot token, model key, OAuth secret and Google tokens', () => {
-  const r = makeRedactor([FAKE_TG, FAKE_KEY, FAKE_SECRET]);
-  const s = r('url https://api.telegram.org/bot' + FAKE_TG + '/getUpdates Authorization: Bearer ' + FAKE_KEY + ' secret ' + FAKE_SECRET +
+test('redaction masks the bot token, model key, Supabase key and Google-style tokens', () => {
+  const r = makeRedactor([FAKE_TG, FAKE_KEY, FAKE_ANON]);
+  const s = r('url https://api.telegram.org/bot' + FAKE_TG + '/getUpdates Authorization: Bearer ' + FAKE_KEY + ' secret ' + FAKE_ANON +
     ' access ya29.' + 'abcDEF123_- refresh 1//' + '0abcdefghijklmnopqrstuvwxyz other bot987654321:' + 'ZZzzOtherTokenValue_1234567890ab');
-  [FAKE_TG, FAKE_KEY, FAKE_SECRET, 'ya29.abc', '1//0abc', 'ZZzz'].forEach((x) => assert.ok(!s.includes(x), x + ' in ' + s));
+  [FAKE_TG, FAKE_KEY, FAKE_ANON, 'ya29.abc', '1//0abc', 'ZZzz'].forEach((x) => assert.ok(!s.includes(x), x + ' in ' + s));
   const lines = [];
   makeLogger(r, (l) => lines.push(l))('ERROR', new Error('fetch failed for https://api.telegram.org/bot' + FAKE_TG + '/sendMessage'));
   assert.ok(!lines[0].includes(FAKE_TG) && /bot\[REDACTED\]/.test(lines[0]));
@@ -366,39 +377,46 @@ test('Telegram client: only getMe/getUpdates/sendMessage; network errors never c
   const c409 = createTelegram({ token: FAKE_TG, redact: makeRedactor([]), fetch: async () => fakeRes(409, { ok: false, description: 'Conflict: terminated by other getUpdates request' }) });
   assert.strictEqual((await c409.getUpdates(1, 25)).kind, 'conflict');
 });
-test('Google: read-only scope, GET-only Sheets reads, token refresh, missing tabs and access errors', async () => {
-  assert.strictEqual(SCOPE, 'https://www.googleapis.com/auth/spreadsheets.readonly');
-  const dir = tmpDir(), tokenFile = path.join(dir, 'google-token.json');
-  fs.writeFileSync(tokenFile, JSON.stringify({ refresh_token: '1//' + 'refreshTokenForTestsOnly_abcdefgh', access_token: 'ya29.' + 'old', expiry_date: NOW - 1000, scope: SCOPE }));
+test('Supabase: select-only reads, rows in the Sheets shape, missing tables, key errors', async () => {
   const calls = [];
-  const g = createGoogle({ clientId: 'c', clientSecret: FAKE_SECRET, tokenFile, now: () => NOW, redact: makeRedactor([FAKE_SECRET]),
-    fetch: async (url, init) => {
-      calls.push({ url, method: init.method, auth: init.headers.Authorization });
-      if (/oauth2/.test(url)) return fakeRes(200, { access_token: 'ya29.' + 'new', expires_in: 3600, scope: SCOPE });
-      if (/Groups/.test(decodeURIComponent(url))) return fakeRes(400, { error: { message: 'Unable to parse range: \'Groups\'' } });
-      if (/Config/.test(decodeURIComponent(url))) return fakeRes(403, { error: { message: 'denied' } });
-      return fakeRes(200, { values: FLIGHTS });
-    } });
-  assert.strictEqual((await g.readRange('sheet123', 'Flights')).rows.length, FLIGHTS.length);
-  assert.deepStrictEqual(await g.readRange('sheet123', 'Groups'), { missing: true });
-  await assert.rejects(g.readRange('sheet123', 'Config'), /HTTP 403 \(the authorised Google account cannot open this spreadsheet/);
-  const disabled = createGoogle({ clientId: 'c', clientSecret: FAKE_SECRET, tokenFile, now: () => NOW, redact: makeRedactor([]),
-    fetch: async () => fakeRes(403, { error: { code: 403, status: 'PERMISSION_DENIED', message: 'Google Sheets API has not been used in project 123 before or it is disabled.', details: [{ reason: 'SERVICE_DISABLED' }] } }) });
-  await assert.rejects(disabled.readRange('sheet123', 'Flights'), /Sheets API is not enabled in your Cloud project/);
-  const sheetCalls = calls.filter((c) => /sheets\.googleapis/.test(c.url));
-  assert.ok(sheetCalls.every((c) => c.method === 'GET' && /\/values\//.test(c.url) && c.auth === 'Bearer ya29.new'), JSON.stringify(sheetCalls));
-  assert.strictEqual(calls.filter((c) => /oauth2/.test(c.url)).length, 1, 'refreshed once, then reused');
-  assert.strictEqual(JSON.parse(fs.readFileSync(tokenFile, 'utf8')).access_token, 'ya29.new');
-  fs.writeFileSync(tokenFile, JSON.stringify({ refresh_token: 'r', scope: 'https://www.googleapis.com/auth/spreadsheets' }));
-  await assert.rejects(g.readRange('sheet123', 'Flights'), /not read-only/);
+  const sb = createSupabase({ redact: makeRedactor([FAKE_ANON]), client: fakeSupabase({ flights: sbObjects(FLIGHTS, snake), status: [{ id: 1, key: 'LAST_TICK_AT', value: iso(NOW), notes: null }] }, calls,
+    { config: { code: 'PGRST301', message: 'JWT expired ' + FAKE_ANON } }) });
+  const f = await sb.readRange('Flights');
+  assert.deepStrictEqual(f.rows[0].slice(0, 3), ['Status', 'Name', 'Phone'], 'snake_case columns come back as the sheet headers');
+  assert.deepStrictEqual(await sb.readRange('Groups'), { missing: true });
+  assert.deepStrictEqual((await sb.readRange('Status')).rows, [['Key', 'Value', 'Notes'], ['LAST_TICK_AT', iso(NOW), '']], 'Key/Value first, whatever the column order');
+  await assert.rejects(sb.readRange('Config'), (e) => /check SUPABASE_ANON_KEY/.test(e.message) && !e.message.includes(FAKE_ANON));
+  assert.deepStrictEqual(calls, [['flights', '*'], ['groups', '*'], ['status', '*'], ['config', '*']]);
+  assert.strictEqual(TABLES.Import, 'flights', 'the Import columns live in the flights table too');
+});
+test('Supabase rows give the bot exactly the snapshot the Flights sheet gave (verbatim and snake_case columns)', async () => {
+  for (const names of [(h) => h, snake]) {
+    const raw = { flights: { rows: toRows(sbObjects(FLIGHTS, names), 'Flights') }, groups: { rows: toRows(sbObjects(GROUPS, names), 'Groups') },
+      config: { rows: toRows(sbObjects(CONFIG, names), 'Config') } };
+    assert.deepStrictEqual(buildSnapshot(raw, NOW), SNAP);
+  }
+});
+test('Supabase timestamps without a zone: UTC for m: columns, IST wall time for coordinator columns', () => {
+  const rows = toRows([{ m_sched_arr: '2026-10-21T02:30:00', sched_arr_ist: '2026-10-21T08:00:00', arrival_date: '2026-10-25' }], 'Flights');
+  assert.deepStrictEqual(rows, [['m:schedArr', 'Sched Arr (IST)', 'arrival date'], ['2026-10-21T02:30:00Z', '2026-10-21 08:00', '2026-10-25']]);
+  assert.deepStrictEqual([parseTime(rows[1][0]), parseTime(rows[1][1])], [NOW, NOW]);
+});
+test('a service-role or secret Supabase key is refused; the anon key is accepted', () => {
+  const jwt = (role) => ['eyJhbGciOiJIUzI1NiJ9', Buffer.from(JSON.stringify({ role })).toString('base64'), 'sig'].join('.');
+  const err = (k) => buildConfig(Object.assign({}, BASE, { SUPABASE_ANON_KEY: k })).problems.some((p) => p.key === 'SUPABASE_ANON_KEY' && p.level === 'error');
+  assert.deepStrictEqual([err(jwt('service_role')), err('sb_' + 'secret_x'), err(jwt('anon')), err('sb_publishable_x')], [true, true, false, false]);
+  assert.ok(buildConfig(Object.assign({}, BASE, { SUPABASE_URL: 'not a url' })).problems.some((p) => p.key === 'SUPABASE_URL' && p.level === 'error'));
+  assert.ok(buildConfig(Object.assign({}, BASE, { SUPABASE_URL: '' })).problems.some((p) => p.key === 'SUPABASE_URL' && p.level === 'error'));
 });
 test('no write operation exists anywhere in the worker source', () => {
   const src = fs.readdirSync(SRC).map((f) => fs.readFileSync(path.join(SRC, f), 'utf8')).join('\n');
   ['setWebhook', 'deleteWebhook', 'setMyCommands', 'batchUpdate', ':append', ':clear', 'values:batchClear', "method: 'PUT'", "method: 'PATCH'",
-    "method: 'DELETE'", 'auth/spreadsheets"', "auth/spreadsheets'", 'auth/drive', 'appendRow', 'setValues', 'child_process', 'eval('].forEach((w) =>
+    "method: 'DELETE'", 'auth/spreadsheets"', "auth/spreadsheets'", 'auth/drive', 'appendRow', 'setValues', 'child_process', 'eval(',
+    '.insert(', '.upsert(', '.update(', '.delete()', '.rpc(', '.storage'].forEach((w) =>
     assert.ok(!src.includes(w), 'found "' + w + '"'));
   const posts = src.match(/method: 'POST'/g) || [];
-  assert.strictEqual(posts.length, 3, 'POST only for Telegram calls, the model, and the OAuth token endpoint');
+  assert.strictEqual(posts.length, 2, 'POST only for Telegram calls and the model');
+  assert.ok(src.match(/\.select\([^)]*\)/g).every((m) => m === ".select('*')"), 'Supabase: select only');
 });
 
 // ---------------------------------------------------------------- run
@@ -436,8 +454,8 @@ test('a stale heartbeat with an empty Flights tab is not mistaken for "cannot re
 });
 test('/status shows when the tracker last ran; the worker reads the Status tab read-only', async () => {
   const reads = [];
-  const src = createSnapshotSource({ readRange: async (id, tab) => { reads.push(tab); return { rows: { Flights: FLIGHTS, Groups: GROUPS, Config: CONFIG, Status: statusTab() }[tab] }; },
-    spreadsheetId: 's', now: () => NOW, ttlMs: 60000, log() {} });
+  const src = createSnapshotSource({ readRange: async (tab) => { reads.push(tab); return { rows: { Flights: FLIGHTS, Groups: GROUPS, Config: CONFIG, Status: statusTab() }[tab] }; },
+    now: () => NOW, ttlMs: 60000, log() {} });
   assert.strictEqual((await src()).lastTick.result, 'ok');
   assert.deepStrictEqual(reads, ['Flights', 'Groups', 'Config', 'Status']);
   const tg = fakeTelegram([[msg(70, 111, '/status')]]);

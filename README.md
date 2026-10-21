@@ -189,10 +189,10 @@ Green columns are yours. Blue columns are written by the script. Hidden `m:` col
 
 ## Local preview dashboard (optional)
 
-`npm run preview` serves a richer copy of the dashboard on `http://localhost:3000`. It reads the sheet with the local assistant's read-only Google sign-in, so set up `local-assistant/` first.
+`npm run preview` serves a richer copy of the dashboard on `http://localhost:3000`. It reads the tracker data from Supabase with the local assistant's anon key (`SUPABASE_URL`, `SUPABASE_ANON_KEY`), so set up `local-assistant/` first.
 
-- **Same data as the Telegram assistant.** By default (`PREVIEW_SOURCE=flights` in `local-assistant/.env.local-assistant`) it reads the tracker's **Flights**, **Groups**, **Config** and **Status** tabs: live statuses, ETAs, cab groups and the heartbeat. The header shows the source: "Data: Google Sheets · Flights tab (tracked) · Tracker last ran …".
-- **Import fallback.** If the Flights tab is missing or has no rows, the preview shows the Import tab's schedules instead and says so in a banner: "Flights tab empty or missing: showing Import-tab schedules only, no live status". `PREVIEW_SOURCE=import` always shows the Import tab (schedules only, every status SCHEDULED).
+- **Same data as the Telegram assistant.** By default (`PREVIEW_SOURCE=flights` in `local-assistant/.env.local-assistant`) it reads the Supabase `flights` table (plus `groups`, `config` and `status` tables if they exist): live statuses, ETAs, cab groups and the heartbeat. The header shows the source: "Data: Supabase · flights table (tracked) · Tracker last ran …".
+- **Import fallback.** If the `flights` table is empty or holds the Import tab's columns rather than the tracker's, the preview shows those schedules instead and says so in a banner: "flights table empty or without the tracker's columns: showing Import-column schedules only, no live status". `PREVIEW_SOURCE=import` always reads the Import columns (schedules only, every status SCHEDULED).
 - **Refresh.** The page refreshes itself every 5 minutes from a 1-minute server cache. The refresh buttons read the sheet again at once (at most once every 5 seconds).
 - **Read-only.** The preview can't force a check or change anything: its **Force check** button is disabled. Use the sheet menu or the deployed dashboard.
 - `?mock=1` shows built-in sample data without touching the sheet.
@@ -240,7 +240,7 @@ Green columns are yours. Blue columns are written by the script. Hidden `m:` col
 |---|---|
 | No **Flight Tracker** menu | Reload the sheet. The script must be opened from this sheet's Extensions menu (bound) |
 | Banner "The tracker has not run for …" / Telegram note "the tracker hasn't updated since …" | The trigger stopped or keeps failing. Read `LAST_TICK_ERROR` on **Status** and the **Log**; run **Check setup**, then **4. Start tracking** if the trigger is missing. "No heartbeat" means **1. Set up sheets** and a first run haven't happened yet |
-| Local preview says "showing Import-tab schedules only" | The Flights tab is empty or missing: run **3. Import from "Import" tab** in the sheet. Or check `PREVIEW_SOURCE` in `local-assistant/.env.local-assistant` |
+| Local preview says "showing Import-column schedules only" | The Supabase `flights` table is empty (row-level security with no SELECT policy for anon looks the same) or lacks the tracker's columns. Or check `PREVIEW_SOURCE` in `local-assistant/.env.local-assistant` |
 | "Authorization required" | Run any menu item and approve. The scopes are in `src/appsscript.json` |
 | Check setup: ❌ Document lock | The script is standalone, not bound. Recreate it from the sheet (step 4) |
 | Check setup: ❌ `ADB_KEY` / `TG_BOT_TOKEN` | Add the property with the exact name (step 6). ⚠️ "spaces" or "does not look like" means re-paste the value |
