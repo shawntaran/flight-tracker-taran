@@ -236,7 +236,7 @@ test('doctor .gitignore check is immune to the caller\'s git environment and glo
     for (const extra of [{}, { GIT_DIR: notARepo }, { GIT_CONFIG_GLOBAL: gcfg }]) {
       const r = spawnSync(process.execPath, [path.join(ROOT, 'tools', 'doctor.js')], { cwd: ROOT, encoding: 'utf8', env: Object.assign({}, base, extra) });
       const line = String(r.stdout).split(/\r?\n/).filter((l) => /\.gitignore:/.test(l)).join(' | ');
-      assert.ok(/^✔ \.gitignore: 10 sensitive paths ignored, 9 project files kept$/.test(line), JSON.stringify(extra) + ' -> ' + line);
+      assert.ok(/^✔ \.gitignore: 13 sensitive paths ignored, 11 project files kept$/.test(line), JSON.stringify(extra) + ' -> ' + line);
     }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

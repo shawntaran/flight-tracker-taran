@@ -13,6 +13,20 @@ const SHEETS = 'https://sheets.googleapis.com/v4/spreadsheets/';
 
 const b64url = (buf) => buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
+/** Google's own error reason -> what to do. Google error bodies hold no credentials. */
+function googleReason(status, body) {
+  let e = null;
+  try { e = JSON.parse(body).error; } catch (x) { e = null; }
+  const text = e ? [e.status, e.message].concat((e.details || []).map((d) => d && d.reason)).filter(Boolean).join(' ') : '';
+  if (/SERVICE_DISABLED|has not been used|is disabled/i.test(text)) {
+    return '(the Google Sheets API is not enabled in your Cloud project: APIs & Services → Library → Google Sheets API → Enable, wait a minute, retry)';
+  }
+  if (/insufficient.*scope|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(text)) return '(token scope too narrow: run "npm run assistant:auth" again)';
+  if (status === 403) return '(the authorised Google account cannot open this spreadsheet: share it with that account as Viewer, or authorise with an account that can open it)' + (text ? '. Google said: ' + text.slice(0, 160) : '');
+  if (status === 404) return '(spreadsheet not found: check GOOGLE_SPREADSHEET_ID)';
+  return text ? '(' + text.slice(0, 160) + ')' : '';
+}
+
 function scopeIsReadOnly(scope) {
   const s = String(scope || '').split(/\s+/).filter(Boolean);
   return s.length > 0 && s.every((x) => x === SCOPE);
@@ -60,8 +74,7 @@ function createGoogle({ clientId, clientSecret, tokenFile, fetch, now, redact })
         return { rows: Array.isArray(j && j.values) ? j.values : [] };
       }
       if (res.status === 400 && /Unable to parse range/i.test(body)) return { missing: true };
-      throw new Error('Sheets read of "' + sheetName + '" failed: HTTP ' + res.status +
-        (res.status === 403 ? ' (no access: share the sheet with the authorised account)' : res.status === 404 ? ' (wrong GOOGLE_SPREADSHEET_ID?)' : ''));
+      throw new Error('Sheets read of "' + sheetName + '" failed: HTTP ' + res.status + ' ' + googleReason(res.status, body));
     } catch (e) {
       throw new Error(redact(e && e.name === 'AbortError' ? 'Sheets read of "' + sheetName + '" timed out' : (e && e.message) || e));
     } finally {

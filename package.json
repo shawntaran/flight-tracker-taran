@@ -6,9 +6,13 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node test/run-tests.js && node test/adb-tests.js && node test/setup-tests.js && node test/dashboard-tests.js && node test/telegram-tests.js && node test/flight-sort-tests.js && node test/flight-position-tests.js && node test/cab-suggestions-tests.js",
+    "test": "node test/run-tests.js && node test/adb-tests.js && node test/setup-tests.js && node test/dashboard-tests.js && node test/telegram-tests.js && node test/flight-sort-tests.js && node test/flight-position-tests.js && node test/cab-suggestions-tests.js && node test/guest-view-tests.js && node local-assistant/test/assistant-tests.js",
     "doctor": "node tools/doctor.js",
     "preview": "node tools/preview-server.js",
-    "push": "clasp push"
+    "push": "clasp push",
+    "assistant": "node local-assistant/src/main.js start",
+    "assistant:auth": "node local-assistant/src/main.js auth",
+    "assistant:health": "node local-assistant/src/main.js health",
+    "test:assistant": "node local-assistant/test/assistant-tests.js"
   }
 }

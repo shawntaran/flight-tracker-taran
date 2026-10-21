@@ -35,7 +35,11 @@ function buildConfig(raw) {
   const get = (k) => String(raw[k] == null ? '' : raw[k]).trim();
   const need = (k, why) => { if (!get(k)) problems.push({ level: 'error', key: k, message: 'missing: ' + why }); };
   need('TG_BOT_TOKEN', 'the bot token from @BotFather');
-  need('ALLOWED_CHAT_IDS', 'comma-separated coordinator chat ids; nobody else is answered');
+  if (!get('ALLOWED_CHAT_IDS')) {
+    // Setup mode: the worker runs but answers nobody; anyone who messages it privately is told their chat id.
+    problems.push({ level: 'warn', key: 'ALLOWED_CHAT_IDS', message: 'empty: setup mode. Nobody gets tracker answers; ' +
+      'message the bot privately and it replies with your chat id. Add the ids here, then restart' });
+  }
   need('GOOGLE_SPREADSHEET_ID', 'the id in the tracker spreadsheet URL');
   need('GOOGLE_OAUTH_CLIENT_ID', 'Google Cloud OAuth client (Desktop app)');
   need('GOOGLE_OAUTH_CLIENT_SECRET', 'Google Cloud OAuth client (Desktop app)');

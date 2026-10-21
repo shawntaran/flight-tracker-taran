@@ -141,6 +141,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="/flight-sort.js"></script>
+<script src="/guest-view.js"></script>
 <script src="/flight-position.js"></script>
 <script src="/grouping-bundle.js"></script>
 <script src="/cab-suggestions.js"></script>
@@ -155,7 +156,7 @@
       <div class="h-8 w-8 rounded-lg bg-primary text-on-primary flex items-center justify-center"><span class="material-symbols-outlined text-[18px]">flight_land</span></div>
       <div class="flex flex-col min-w-0">
         <span class="font-headline-sm text-headline-sm text-primary tracking-tight truncate leading-none">Flight Tracker</span>
-        <span class="font-label-sm text-label-sm text-secondary uppercase font-bold tracking-wider mt-0.5"><span data-f="home">BLR</span> Operations</span>
+        <span class="font-label-sm text-label-sm text-secondary uppercase font-bold tracking-wider mt-0.5">ITW 2026</span>
       </div>
     </div>
     <div class="px-space-md py-space-sm"><span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant/70 px-space-xs">Navigation</span></div>
@@ -178,7 +179,7 @@
       <span class="font-data-mono text-data-mono text-on-surface-variant font-medium">Asia/Kolkata (IST)</span>
     </div>
     <div class="mt-1 px-1 py-1 rounded bg-secondary-fixed border border-secondary-fixed-dim/40 text-center">
-      <span class="font-label-sm text-[10px] uppercase tracking-wider text-on-secondary-fixed font-semibold">⚗ Local Preview · Mock Data</span>
+      <span id="preview-badge" class="font-label-sm text-[10px] uppercase tracking-wider text-on-secondary-fixed font-semibold">⚗ Local Preview · Mock Data</span>
     </div>
   </div>
 </aside>
@@ -280,14 +281,14 @@
               </div>
               <div class="flex items-center gap-space-xs self-stretch sm:self-auto justify-end">
                 <button data-refresh class="h-9 w-9 rounded-lg bg-surface-container-low text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors flex items-center justify-center" title="Refresh data"><span class="material-symbols-outlined text-[18px]">cached</span></button>
-                <a data-page="flights" href="#flights" class="h-9 px-3.5 rounded-lg bg-primary text-on-primary font-label-md text-label-md flex items-center gap-1.5 whitespace-nowrap"><span>All <span id="all-count">0</span> Flights</span><span class="material-symbols-outlined text-[14px]">arrow_forward</span></a>
+                <a data-page="flights" href="#flights" class="h-9 px-3.5 rounded-lg bg-primary text-on-primary font-label-md text-label-md flex items-center gap-1.5 whitespace-nowrap"><span>All <span id="all-count">0</span> Guests</span><span class="material-symbols-outlined text-[14px]">arrow_forward</span></a>
               </div>
             </div>
             <div class="flex items-center justify-between pt-space-xs gap-2">
               <div class="flex items-center gap-1 bg-surface-container-low p-1 rounded-lg overflow-x-auto" role="tablist">
-                <button data-dir="ALL" role="tab" class="px-3 py-1 rounded font-label-sm text-label-sm transition-all whitespace-nowrap">All Inbound / Outbound (<span data-count="ALL">0</span>)</button>
-                <button data-dir="ARR" role="tab" class="px-3 py-1 rounded font-label-sm text-label-sm transition-colors whitespace-nowrap">Arrivals <span data-f="home">BLR</span> (<span data-count="ARR">0</span>)</button>
-                <button data-dir="DEP" role="tab" class="px-3 py-1 rounded font-label-sm text-label-sm transition-colors whitespace-nowrap">Departures <span data-f="home">BLR</span> (<span data-count="DEP">0</span>)</button>
+                <button data-dir="ALL" role="tab" class="px-3 py-1 rounded font-label-sm text-label-sm transition-all whitespace-nowrap">All guests (<span data-count="ALL">0</span>)</button>
+                <button data-dir="ARR" role="tab" class="px-3 py-1 rounded font-label-sm text-label-sm transition-colors whitespace-nowrap">Arriving <span data-f="home">BLR</span> (<span data-count="ARR">0</span>)</button>
+                <button data-dir="DEP" role="tab" class="px-3 py-1 rounded font-label-sm text-label-sm transition-colors whitespace-nowrap">Departing <span data-f="home">BLR</span> (<span data-count="DEP">0</span>)</button>
               </div>
               <div class="hidden md:flex items-center gap-space-sm font-data-mono text-[11px] text-on-surface-variant">
                 <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-on-tertiary-container"></span>Live Tracking (ADS-B)</span>
@@ -300,18 +301,15 @@
               <table class="w-full text-left border-collapse">
                 <thead>
                   <tr class="bg-surface-container-low/60 font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">
-                    <th class="py-3 px-4 font-semibold">Flight / Carrier</th>
-                    <th class="py-3 px-3 font-semibold">Faculty Guest</th>
-                    <th class="py-3 px-3 font-semibold">Route (<span data-f="home">BLR</span>)</th>
-                    <th class="py-3 px-3 font-semibold">Sched</th>
-                    <th class="py-3 px-3 font-semibold">Estimated / Act</th>
-                    <th class="py-3 px-3 font-semibold">Transit Status</th>
+                    <th class="py-3 px-4 font-semibold">Faculty Guest</th>
+                    <th class="py-3 px-3 font-semibold">Arrival (<span data-f="home">BLR</span>)</th>
+                    <th class="py-3 px-3 font-semibold">Departure (<span data-f="home">BLR</span>)</th>
                     <th class="py-3 px-3 font-semibold">Cab Suggestion</th>
                     <th class="py-3 pr-4 pl-2 text-right font-semibold">Action</th>
                   </tr>
                 </thead>
                 <tbody id="rows" class="text-on-surface font-body-sm text-body-sm">
-                  <tr><td colspan="8" class="py-6 px-4 text-center text-on-surface-variant">Loading flights…</td></tr>
+                  <tr><td colspan="5" class="py-6 px-4 text-center text-on-surface-variant">Loading guests…</td></tr>
                 </tbody>
               </table>
             </div>
@@ -679,7 +677,7 @@
       <div id="settings-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-gutter-desktop"></div>
     </div>
 
-    <!-- ===== ASSISTANT (same as original DashboardPage.html) ===== -->
+    <!-- ===== ASSISTANT: answers come from the local model (tools/ops-assistant.js) with this page's flight data ===== -->
     <div class="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
       <div id="flight-assistant-card" class="hidden w-[360px] max-w-[calc(100vw-2rem)] bg-surface-container-lowest border border-outline-variant/30 rounded-xl shadow-xl overflow-hidden flex-col">
         <div class="bg-surface-container-low/70 px-4 py-3 border-b border-outline-variant/20 flex items-center justify-between">
@@ -687,12 +685,12 @@
             <div class="w-6 h-6 rounded bg-primary text-on-primary flex items-center justify-center"><span class="material-symbols-outlined text-[14px]">auto_awesome</span></div>
             <div class="flex flex-col">
               <span class="font-label-md text-label-md font-semibold text-on-surface leading-none">Operations Assistant</span>
-              <div class="flex items-center gap-1.5 mt-0.5"><span id="assistant-dot" class="w-1.5 h-1.5 rounded-full bg-outline"></span><span id="assistant-state" class="font-label-sm text-[10px] text-on-surface-variant">Not connected</span></div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span id="assistant-dot" class="w-1.5 h-1.5 rounded-full bg-outline"></span><span id="assistant-state" class="font-label-sm text-[10px] text-on-surface-variant">Checking model…</span></div>
             </div>
           </div>
           <button id="assistant-close" class="p-1 text-on-surface-variant hover:text-on-surface rounded hover:bg-surface-container transition-colors" title="Minimize assistant" type="button"><span class="material-symbols-outlined text-[16px]">close</span></button>
         </div>
-        <div id="assistant-thread" class="p-4 flex flex-col gap-3 max-h-[380px] overflow-y-auto">
+        <div id="assistant-thread" class="p-4 flex flex-col gap-3 max-h-[380px] overflow-y-auto" aria-live="polite">
           <div class="p-3 rounded-lg bg-surface-container-low/60 border border-outline-variant/10 text-on-surface font-body-sm text-body-sm leading-relaxed">Hello. How can I assist with today's arrivals or cab schedules?</div>
           <div class="flex flex-col gap-1.5">
             <span class="font-label-sm text-[10px] uppercase tracking-wider text-on-surface-variant font-semibold px-0.5">Suggested inquiries</span>
@@ -707,7 +705,7 @@
         <form id="assistant-form" class="p-3 border-t border-outline-variant/20 bg-surface-container-lowest">
           <div class="relative flex items-center">
             <input id="assistant-input" class="w-full h-9 pl-3 pr-8 bg-surface-container-low text-on-surface font-body-sm text-[12px] rounded-lg placeholder:text-on-surface-variant/60 focus:bg-surface-container-lowest focus:ring-1 focus:ring-secondary outline-none transition-all" placeholder="Ask about flights, delays, or cab assignments..." type="text" aria-label="Message the assistant" maxlength="500">
-            <button class="absolute right-2 p-1 text-on-surface-variant hover:text-secondary transition-colors flex items-center justify-center" title="Send message" type="submit"><span class="material-symbols-outlined text-[16px]">send</span></button>
+            <button id="assistant-send" class="absolute right-2 p-1 text-on-surface-variant hover:text-secondary disabled:opacity-40 transition-colors flex items-center justify-center" title="Send message" type="submit"><span class="material-symbols-outlined text-[16px]">send</span></button>
           </div>
         </form>
       </div>
@@ -741,6 +739,8 @@
   var term = function (t) { return t ? (/^t/i.test(t) ? t.toUpperCase() : 'T' + t) : ''; };
   var carrier = function (f) { var m = /^([A-Z0-9]{2})/.exec(f.flight || ''); return m ? m[1] : '—'; };
   var FS = window.FlightSort; // shared time/sort rules (tools/flight-sort.js)
+  var GV = window.GuestView;   // one entry per guest, active-leg rules (tools/guest-view.js)
+  var legFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
   var delayOf = function (f) { return FS.delayMin(f); };
 
   // ===== STATE =====
@@ -810,6 +810,9 @@
     $('synced-ago').textContent = 'Syncing…';
     google.script.run.withSuccessHandler(function (d) {
       state.data = d; state.loadedAt = Date.now();
+      state.guests = GV.groupGuests(d.flights, d.generatedAt, FS);
+      state.guestOf = {};
+      state.guests.forEach(function (g) { [g.arrival, g.departure].concat(g.extra).forEach(function (f) { if (f) state.guestOf[f.id] = g; }); });
       renderGlobal();
       renderPage(state.page);
       tickAgo();
@@ -836,7 +839,7 @@
     $('today').textContent = 'Today, ' + dateFmt.format(now);
     $('attribution').textContent = d.attribution;
     renderEngine(d);
-    renderAssistantState(d);
+    refreshAssistantStatus();
   }
 
   // ===== SHARED RENDERERS =====
@@ -918,7 +921,8 @@
     var n = d.tickTriggers, on = n >= 1;
     $('engine-dot').className = 'w-2 h-2 rounded-full ' + (n === 1 ? 'bg-on-tertiary-container animate-pulse' : n > 1 ? 'bg-error' : 'bg-outline');
     $('engine-label').textContent = n == null ? 'Engine status unknown' : n === 1 ? 'Engine Active' : n > 1 ? n + ' triggers (duplicate)' : 'Engine stopped';
-    $('sync-label').textContent = d.preview ? 'Mock data (local preview)' : on ? 'Live Syncing (OpenSky / ADB)' : 'Tracking stopped';
+    $('sync-label').textContent = d.preview ? 'Mock data (local preview)' : d.source ? 'Live: ' + d.source : on ? 'Live Syncing (OpenSky / ADB)' : 'Tracking stopped';
+    $('preview-badge').textContent = d.preview ? '⚗ Local Preview · Mock Data' : '⚗ Local Preview · Sheet Data';
     $('sync-dot').className = 'w-1.5 h-1.5 rounded-full ' + (on ? 'bg-on-tertiary-container' : 'bg-outline');
     $('trigger-note').textContent = n == null ? '' : on ? 'Trigger installed' : 'Start tracking from the sheet menu';
   }
@@ -951,24 +955,47 @@
     $('m-groups').textContent = cm.shared.length;
     $('m-guests').textContent = cm.shared.reduce(function (n, x) { return n + x.members.length; }, 0) + ' could share · ' + cm.individual.length + ' individual';
   }
-  function visibleOverviewFlights() {
-    var q = state.overview.query.toLowerCase(), groups = groupIndex();
-    return state.data.flights.filter(function (f) {
-      if (state.overview.dir !== 'ALL' && f.dir !== state.overview.dir) return false;
+  // One row per guest (tools/guest-view.js). The tabs filter by trip phase: arriving = inbound, departing = outbound.
+  var PHASE_TAB = { ARR: 'inbound', DEP: 'outbound' };
+  function visibleOverviewGuests() {
+    var q = state.overview.query.toLowerCase();
+    return GV.sortGuests(state.guests.filter(function (g) {
+      if (state.overview.dir !== 'ALL' && g.phase !== PHASE_TAB[state.overview.dir]) return false;
       if (!q) return true;
-      var g = groups[f.groupId] || {};
-      return [f.flight, f.name, f.status].join(' ').toLowerCase().indexOf(q) >= 0;
-    }).sort(function (a, b) {
-      return (a.active === b.active ? 0 : a.active ? -1 : 1) || (a.final === b.final ? 0 : a.final ? 1 : -1) ||
-        (FS.sortFlights([a, b], 'soonest', 'inbound')[0] === a ? -1 : 1);
-    });
+      return [g.name, g.arrival && g.arrival.flight, g.departure && g.departure.flight].join(' ').toLowerCase().indexOf(q) >= 0;
+    }), FS);
+  }
+  // Leg styling: active = highlighted, upcoming = normal, done = muted, missing = faded N/A.
+  var LEG_BOX = {
+    active: 'ring-1 ring-secondary bg-secondary-fixed/40 shadow-sm',
+    upcoming: 'opacity-90',
+    done: 'opacity-50',
+    missing: 'opacity-40 border border-dashed border-outline-variant'
+  };
+  function legCell(f, legState, kind) {
+    var box = 'rounded-lg px-2.5 py-1.5 min-w-[150px] flex flex-col gap-0.5 ' + LEG_BOX[legState];
+    if (!f) {
+      return '<div class="' + box + '"><span class="font-data-mono text-[13px] font-bold text-on-surface-variant">N/A</span>' +
+        '<span class="text-[10px] text-on-surface-variant italic">No ' + kind + ' booked</span></div>';
+    }
+    var t = FS.bestTime(f).ms;
+    var tagCls = legState === 'active' ? 'bg-secondary text-on-secondary' : 'bg-surface-container text-on-surface-variant';
+    var tagText = legState === 'active' ? (kind === 'arrival' ? 'Next: arriving' : 'Next: departing')
+      : legState === 'done' ? (kind === 'arrival' ? 'Arrived' : 'Departed') : 'Later';
+    return '<div class="' + box + '">' +
+      '<div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[14px] text-on-surface-variant">' + (kind === 'arrival' ? 'flight_land' : 'flight_takeoff') + '</span>' +
+        '<span class="font-data-mono text-[13px] font-bold ' + (f.invalid ? 'text-error' : 'text-on-surface') + '">' + esc(f.flight || '—') + '</span>' +
+        (f.terminal ? '<span class="text-[10px] px-1.5 rounded bg-surface-container text-on-surface-variant font-semibold">' + esc(term(f.terminal)) + '</span>' : '') +
+        '<span class="px-1.5 rounded text-[9px] uppercase font-bold ' + tagCls + '">' + tagText + '</span></div>' +
+      '<span class="font-data-mono text-[11px] ' + (legState === 'active' ? 'text-on-surface font-semibold' : 'text-on-surface-variant') + '">' +
+        (t == null ? 'Time not set' : esc(legFmt.format(t)) + ' IST') + '</span></div>';
   }
   function renderOverviewTable() {
-    var d = state.data, groups = groupIndex(), list = visibleOverviewFlights();
-    var counts = { ALL: d.flights.length, ARR: 0, DEP: 0 };
-    d.flights.forEach(function (f) { counts[f.dir]++; });
+    var d = state.data, groups = groupIndex(), list = visibleOverviewGuests();
+    var counts = { ALL: state.guests.length, ARR: 0, DEP: 0 };
+    state.guests.forEach(function (g) { if (g.phase === 'inbound') counts.ARR++; else if (g.phase === 'outbound') counts.DEP++; });
     Object.keys(counts).forEach(function (k) { var el = document.querySelector('[data-count="' + k + '"]'); if (el) el.textContent = counts[k]; });
-    $('all-count').textContent = d.flights.length;
+    $('all-count').textContent = state.guests.length;
     $$('[data-dir]').forEach(function (b) {
       var on = b.getAttribute('data-dir') === state.overview.dir;
       b.setAttribute('aria-selected', on);
@@ -976,26 +1003,20 @@
         (on ? 'bg-surface-container-lowest text-on-surface shadow-sm font-semibold' : 'text-on-surface-variant hover:text-on-surface');
     });
     if (!list.length) {
-      $('rows').innerHTML = '<tr><td colspan="8" class="py-6 px-4 text-center text-on-surface-variant">' +
-        (d.flights.length ? 'No flights match this view.' : 'No flights yet.') + '</td></tr>';
+      $('rows').innerHTML = '<tr><td colspan="5" class="py-6 px-4 text-center text-on-surface-variant">' +
+        (state.guests.length ? 'No guests match this view.' : 'No guests yet.') + '</td></tr>';
       return;
     }
-    $('rows').innerHTML = list.map(function (f, i) {
-      var dim = !f.active || (f.final && f.status !== 'LANDED') ? ' opacity-75' : '';
-      return '<tr class="hover:bg-surface-container-low/40 transition-colors group ' + (i % 2 ? 'bg-surface-container-low/20' : 'bg-surface-container-lowest') + '">' +
-        '<td class="py-3.5 px-4 whitespace-nowrap' + dim + '"><div class="flex items-center gap-2.5"><div class="w-7 h-7 rounded bg-surface-container-high flex items-center justify-center text-primary font-data-mono text-[11px] font-bold">' + esc(carrier(f)) + '</div>' +
-          '<div class="flex flex-col"><span class="font-data-mono text-[13px] font-bold ' + (f.invalid ? 'text-error' : 'text-on-surface group-hover:text-secondary') + ' transition-colors">' + esc(f.flight) + '</span>' +
-          '<span class="text-[10px] text-on-surface-variant/60 font-mono">' + (f.dir === 'ARR' ? 'Arrival' : 'Departure') + '</span></div></div></td>' +
-        '<td class="py-3.5 px-3 min-w-[160px]' + dim + '"><div class="flex flex-col"><span class="font-medium text-on-surface font-label-md text-label-md">' + esc(f.name || f.id) + '</span>' +
-          '<span class="text-[11px] text-on-surface-variant/60 truncate">—</span></div></td>' +
-        '<td class="py-3.5 px-3 whitespace-nowrap' + dim + '">' + routeCell(f, d.homeAirport) + '</td>' +
-        '<td class="py-3.5 px-3 whitespace-nowrap font-data-mono text-[12px] text-on-surface-variant' + dim + '">' + hm(f.schedAt) + '</td>' +
-        '<td class="py-3.5 px-3 whitespace-nowrap font-data-mono text-[12px]' + dim + '">' + estimateCell(f) + '</td>' +
-        '<td class="py-3.5 px-3 whitespace-nowrap' + dim + '">' + statusPill(f) + '</td>' +
-        '<td class="py-3.5 px-3 whitespace-nowrap' + dim + '">' + cabCell(f, groups, d.maxSeats) + '</td>' +
-        '<td class="py-3.5 pr-4 pl-2 text-right whitespace-nowrap">' + (!f.active
-          ? '<span class="font-data-mono text-[11px] text-on-surface-variant">Inactive</span>'
-          : '<button disabled class="p-1 rounded text-on-surface-variant ft-off" title="Row actions not available in preview" type="button"><span class="material-symbols-outlined text-[18px]">more_vert</span></button>') + '</td></tr>';
+    $('rows').innerHTML = list.map(function (g, i) {
+      var done = g.phase === 'completed';
+      var phase = g.phase === 'inbound' ? 'Arriving' : g.phase === 'outbound' ? 'In ' + esc(d.homeAirport || 'BLR') + ' · departing next' : done ? 'Trip complete' : '—';
+      return '<tr class="hover:bg-surface-container-low/40 transition-colors ' + (done ? 'opacity-70 ' : '') + (i % 2 ? 'bg-surface-container-low/20' : 'bg-surface-container-lowest') + '">' +
+        '<td class="py-3 px-4 min-w-[170px]"><div class="flex flex-col"><span class="font-medium text-on-surface font-label-md text-label-md">' + esc(g.name) + '</span>' +
+          '<span class="text-[11px] text-on-surface-variant">' + phase + '</span></div></td>' +
+        '<td class="py-2.5 px-3 whitespace-nowrap">' + legCell(g.arrival, g.legs.arrival, 'arrival') + '</td>' +
+        '<td class="py-2.5 px-3 whitespace-nowrap">' + legCell(g.departure, g.legs.departure, 'departure') + '</td>' +
+        '<td class="py-3 px-3 whitespace-nowrap">' + (g.arrival && g.phase === 'inbound' ? cabCell(g.arrival, groups, d.maxSeats) : '<span class="font-data-mono text-[11px] text-on-surface-variant">—</span>') + '</td>' +
+        '<td class="py-3 pr-4 pl-2 text-right whitespace-nowrap"><a href="#flights" class="p-1 rounded text-on-surface-variant hover:text-on-surface inline-flex" title="Open the Flights page"><span class="material-symbols-outlined text-[18px]">open_in_new</span></a></td></tr>';
     }).join('');
   }
   function renderAttention(d) {
@@ -1204,7 +1225,7 @@
         '</div>' +
         // C: status and times
         '<div class="order-4 md:order-3 col-span-2 md:col-span-1 flex md:flex-col items-center md:items-end justify-between gap-1.5">' + flightPill(f) + timesBlock(f, now) + '</div>' +
-      '</button>' +
+      '</button>' + otherLegStrip(f) +
       '<div class="ft-expand" id="fd-' + esc(f.id) + '"' + (open ? '' : ' inert') + '><div>' + detailsHtml(f, ctx) + '</div></div>' +
     '</article>';
   }
@@ -1334,7 +1355,7 @@
 
   function renderFlightsPage() {
     var d = state.data, st = state.flights, ctx = flightsCtx();
-    var view = FS.buildView(d.flights, { filter: st.filter, query: st.query, sort: st.sort });
+    var view = FS.buildView(activeLegFlights(), { filter: st.filter, query: st.query, sort: st.sort });
     st.lastView = view;
     renderFilterTabs(view);
     $('fl-sort').value = view.sort;
@@ -1348,7 +1369,7 @@
       b.className = 'p-1.5 rounded-md transition-colors ' + (on ? 'bg-surface-container-lowest text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface');
     });
     var filterName = FILTER_META.filter(function (m) { return m[0] === view.filter; })[0][1];
-    $('fl-summary').textContent = 'Showing ' + view.shown + ' of ' + view.total + ' flights' +
+    $('fl-summary').textContent = 'Showing ' + view.shown + ' of ' + view.total + ' guests (current leg)' +
       (view.filter !== 'ALL' ? ' · ' + filterName : '') + (st.query ? ' · “' + st.query + '”' : '') + ' · ' + SORT_TEXT[view.sort];
     $('fl-cards').classList.toggle('hidden', st.view !== 'cards');
     $('fl-table').classList.toggle('hidden', st.view !== 'table');
@@ -1362,6 +1383,22 @@
       if (pc) setTimeout(function () { highlightFlight(pid, true); }, 0);
     }
     renderOpsSidebar(ctx);
+  }
+
+  // One card per guest: the leg they are on now (tools/guest-view.js); the other leg is a muted line on the card.
+  function activeLegFlights() {
+    return state.guests.map(function (g) { return g.activeFlight; }).filter(Boolean);
+  }
+  function otherLegStrip(f) {
+    var g = state.guestOf && state.guestOf[f.id];
+    if (!g) return '';
+    var kind = f.dir === 'ARR' ? 'departure' : 'arrival', o = g[kind], st = g.legs[kind];
+    var label = kind === 'arrival' ? 'Arrival' : 'Departure';
+    if (!o) return '<div class="pl-space-md pr-space-sm pb-2 -mt-1 font-data-mono text-[11px] text-on-surface-variant opacity-50 italic">' + label + ': N/A (not booked)</div>';
+    var t = FS.bestTime(o).ms;
+    return '<div class="pl-space-md pr-space-sm pb-2 -mt-1 font-data-mono text-[11px] text-on-surface-variant ' + (st === 'done' ? 'opacity-50' : 'opacity-80') + '">' +
+      label + (st === 'done' ? ' (done)' : ' (later)') + ': ' + esc(o.flight || '—') + (o.terminal ? ' · ' + esc(term(o.terminal)) : '') +
+      (t != null ? ' · ' + esc(legFmt.format(t)) + ' IST' : '') + '</div>';
   }
 
   function emptyState() {
@@ -1867,42 +1904,183 @@
   }
 
   // ===== ASSISTANT =====
-  var aCard = $('flight-assistant-card'), aTrigger = $('flight-assistant-trigger'), aInput = $('assistant-input');
+  // Conversation with the local model. Each question goes out with the recent conversation and the consolidated
+  // flight data this page is showing (one entry per guest, plus the cab suggestions); the preview server puts that
+  // data into the system prompt (tools/ops-assistant.js). Read-only: nothing is booked, sent or written.
+  var aCard = $('flight-assistant-card'), aTrigger = $('flight-assistant-trigger'), aInput = $('assistant-input'), aSend = $('assistant-send');
+  var chat = { messages: [], busy: false, statusAt: 0 };
+  var ASSISTANT_CONTEXT_CHARS = 55000; // under the server's limit
   function setAssistantOpen(open) {
     aCard.classList.toggle('hidden', !open); aCard.classList.toggle('flex', open);
     aTrigger.setAttribute('aria-expanded', open);
-    if (open) aInput.focus();
+    if (open) { aInput.focus(); refreshAssistantStatus(); }
   }
   aTrigger.addEventListener('click', function () { setAssistantOpen(aCard.classList.contains('hidden')); });
   $('assistant-close').addEventListener('click', function () { setAssistantOpen(false); });
   $$('[data-suggest]').forEach(function (b) {
-    b.addEventListener('click', function () { aInput.value = b.querySelector('span').textContent.trim(); aInput.focus(); });
+    b.addEventListener('click', function () { askAssistant(b.querySelector('span').textContent.trim()); }); // not the icon's ligature text
   });
-  function bubble(text, mine) {
+  function scrollThread() { $('assistant-thread').scrollTop = $('assistant-thread').scrollHeight; }
+  function bubble(text, kind) {
     var el = document.createElement('div');
-    el.className = mine ? 'self-end max-w-[85%] px-3 py-2 rounded-lg bg-primary text-on-primary font-body-sm text-[12px]'
-      : 'p-3 rounded-lg bg-surface-container-low/60 border border-outline-variant/10 text-on-surface font-body-sm text-body-sm leading-relaxed';
+    el.className = kind === 'user' ? 'self-end max-w-[85%] px-3 py-2 rounded-lg bg-primary text-on-primary font-body-sm text-[12px] whitespace-pre-line'
+      : kind === 'error' ? 'p-3 rounded-lg bg-error-container text-on-error-container font-body-sm text-body-sm leading-relaxed whitespace-pre-line'
+      : 'p-3 rounded-lg bg-surface-container-low/60 border border-outline-variant/10 text-on-surface font-body-sm text-body-sm leading-relaxed whitespace-pre-line';
     el.textContent = text;
     $('assistant-thread').appendChild(el);
-    $('assistant-thread').scrollTop = $('assistant-thread').scrollHeight;
+    scrollThread();
+    return el;
   }
-  function renderAssistantState(d) {
-    var on = !!(d && d.assistant && d.assistant.enabled);
-    $('assistant-state').textContent = on ? 'Online · Ground Ops Agent' : 'Not connected';
-    $('assistant-dot').className = 'w-1.5 h-1.5 rounded-full ' + (on ? 'bg-on-tertiary-container' : 'bg-outline');
+  function typingBubble() {
+    var el = document.createElement('div');
+    el.className = 'self-start px-3 py-2.5 rounded-lg bg-surface-container-low/60 border border-outline-variant/10 flex items-center gap-1';
+    el.setAttribute('role', 'status'); el.setAttribute('aria-label', 'The assistant is thinking');
+    el.innerHTML = [0, 150, 300].map(function (ms) {
+      return '<span class="w-1.5 h-1.5 rounded-full bg-on-surface-variant animate-bounce" style="animation-delay:' + ms + 'ms"></span>';
+    }).join('');
+    $('assistant-thread').appendChild(el);
+    scrollThread();
+    return el;
+  }
+  function setAssistantStatus(text, dot, title) {
+    $('assistant-state').textContent = text;
+    $('assistant-state').title = title || '';
+    $('assistant-dot').className = 'w-1.5 h-1.5 rounded-full ' + dot;
+  }
+  function refreshAssistantStatus() {
+    if (!(window.google && google.script && google.script.run && google.script.run.getAssistantStatus)) return;
+    if (Date.now() - chat.statusAt < 30000) return;
+    chat.statusAt = Date.now();
+    google.script.run.withSuccessHandler(function (s) {
+      if (s && s.online) setAssistantStatus('Online · ' + s.model, 'bg-on-tertiary-container');
+      else setAssistantStatus('Model offline', 'bg-error', (s && s.detail) || '');
+    }).withFailureHandler(function (e) {
+      setAssistantStatus('Model offline', 'bg-error', String(e && e.message || e));
+    }).getAssistantStatus();
+  }
+  function setBusy(busy) {
+    chat.busy = busy;
+    aInput.disabled = busy; aSend.disabled = busy;
+    $$('[data-suggest]').forEach(function (b) { b.disabled = busy; b.classList.toggle('opacity-50', busy); });
+    if (!busy) aInput.focus();
+  }
+
+  // The consolidated flight data for the model: one entry per guest with both legs, and the cab suggestions.
+  function istText(ms) { return typeof ms === 'number' && isFinite(ms) ? legFmt.format(ms) + ' IST' : null; }
+  function compact(o) { Object.keys(o).forEach(function (k) { if (o[k] == null || o[k] === '') delete o[k]; }); return o; }
+  // Small local models are poor at date arithmetic, so every time also gets its IST day relative to now.
+  function dayLabel(ms) {
+    var n = FS.istDayOffset(ms, Date.now());
+    return n == null ? null : n === 0 ? 'today' : n === 1 ? 'tomorrow' : n === -1 ? 'yesterday' : n > 0 ? 'in ' + n + ' days' : -n + ' days ago';
+  }
+  function legLine(f) {
+    var t = FS.bestTime(f).ms;
+    return f.name + ' (' + f.flight + ', ' + (istText(t) || 'time not set') + (t != null ? ', ' + dayLabel(t) : '') + (f.terminal ? ', ' + f.terminal : '') + ')';
+  }
+  /** Pre-computed answers to the common questions, so the model only has to read them out. */
+  function assistantOverview(flights) {
+    var now = Date.now(), live = flights.filter(function (f) { return f.active !== false; });
+    var t = function (f) { return FS.bestTime(f).ms; };
+    var byTime = function (a, b) { return (t(a) || Infinity) - (t(b) || Infinity); };
+    var arr = live.filter(function (f) { return f.dir === 'ARR'; }).sort(byTime), dep = live.filter(function (f) { return f.dir === 'DEP'; }).sort(byTime);
+    var liveStatus = live.some(function (f) { return FS.validEtaMs(f) != null || (f.status && f.status !== 'SCHEDULED'); });
+    var perDay = {};
+    arr.forEach(function (f) { if (t(f) != null) { var k = legFmt.format(t(f)).replace(/,? \d{1,2}:\d{2}$/, ''); perDay[k] = (perDay[k] || 0) + 1; } });
+    return {
+      liveStatusAvailable: liveStatus,
+      liveStatusNote: liveStatus ? null : 'This data has flight SCHEDULES ONLY: no live status or ETA is tracked yet, so the tracker cannot tell whether any flight is delayed or early. Every status is SCHEDULED for that reason.',
+      arrivalsToday: arr.filter(function (f) { return dayLabel(t(f)) === 'today'; }).map(legLine),
+      departuresToday: dep.filter(function (f) { return dayLabel(t(f)) === 'today'; }).map(legLine),
+      arrivalsTomorrow: arr.filter(function (f) { return dayLabel(t(f)) === 'tomorrow'; }).map(legLine),
+      nextArrivals: arr.filter(function (f) { return t(f) != null && t(f) >= now && !FS.isCompleted(f); }).slice(0, 6).map(legLine),
+      nextDepartures: dep.filter(function (f) { return t(f) != null && t(f) >= now && !FS.isCompleted(f); }).slice(0, 4).map(legLine),
+      arrivalsPerDay: perDay,
+      delayed: live.filter(FS.isDelayed).map(function (f) { return legLine(f) + ': ' + (f.status || '') + (FS.delayMin(f) != null ? ', ' + FS.delayMin(f) + ' min late' : ''); }),
+      unknownStatus: live.filter(function (f) { return f.status === 'UNKNOWN'; }).map(legLine),
+      totals: { guests: (state.guests || []).length, arrivals: arr.length, departures: dep.length }
+    };
+  }
+  function legForModel(f) {
+    if (!f) return null;
+    var ci = f.dir === 'ARR' ? cabInfo(f.id) : null;
+    var d = state.data;
+    return compact({ // repeated values (home airport, a source every flight shares) are stated once at the top instead
+      flight: f.flight, status: f.status || 'SCHEDULED',
+      airport: f.airport !== (d.homeAirport || 'BLR') ? f.airport : null, terminal: f.terminal, gate: f.gate,
+      from: f.dir === 'ARR' ? f.origin : null, to: f.dir === 'DEP' ? f.destination : null,
+      scheduled: istText(FS.toMs(f.schedAt)), estimated: istText(FS.validEtaMs(f)), day: dayLabel(FS.bestTime(f).ms),
+      delayed: FS.isDelayed(f) || null, delayMinutes: FS.delayMin(f),
+      completed: FS.isCompleted(f) || f.final || null, active: f.active === false ? false : null,
+      timeSource: f.etaSource !== state.assistantCommonSource ? f.etaSource : null, trackerNote: f.lastError,
+      cabSuggestion: ci ? compact({ suggestion: ci.label, suggestedPickup: istText(ci.pickupMs),
+        sharingWith: ci.with.length ? ci.with.map(function (o) { return o.name + ' (' + o.flight + ')'; }) : null }) : null
+    });
+  }
+  function assistantContext() {
+    var d = state.data, cm = cabModel() || { shared: [], individual: [], excluded: [] };
+    var sources = (d.flights || []).map(function (f) { return f.etaSource || ''; });
+    state.assistantCommonSource = sources.length && sources.every(function (x) { return x === sources[0]; }) ? sources[0] : null;
+    var guests = (state.guests || []).map(function (g) {
+      return compact({ name: g.name, phase: g.phase, arrival: legForModel(g.arrival), departure: legForModel(g.departure),
+        otherFlights: g.extra.length ? g.extra.map(legForModel) : null });
+    });
+    var ctx = compact({
+      now: istText(Date.now()), today: legFmt.format(Date.now()).replace(/,? \d{1,2}:\d{2}$/, ''), dataReadAt: istText(d.generatedAt),
+      timezone: 'IST (UTC+05:30)', homeAirport: d.homeAirport || 'BLR', allFlightsAirport: (d.homeAirport || 'BLR') + ' unless a flight says otherwise',
+      allTimesSource: state.assistantCommonSource || null,
+      dataSource: d.source || (/[?&]mock=1\b/.test(location.search) ? 'synthetic preview data' : null),
+      overview: compact(assistantOverview(d.flights || [])),
+      notes: ['overview is pre-computed from the flights below and is correct; prefer it. "day" on each flight is relative to today.',
+        'phase: inbound = arrival still ahead; outbound = arrived, departure ahead; completed = all legs done.',
+        'Cab suggestions are the tracker\'s suggestions only; nothing is booked.'],
+      guests: guests,
+      cabSuggestions: cm.shared.map(function (s) {
+        return { suggestion: s.label, terminal: s.terminal || 'not confirmed', suggestedPickup: istText(s.pickupMs), reason: s.reason,
+          members: s.members.map(function (m) { return m.f.name + ' (' + m.f.flight + ', ' + istText(m.t) + ')'; }) };
+      }),
+      individualPickups: cm.individual.map(function (s) { var m = s.members[0]; return m.f.name + ' (' + m.f.flight + '): ' + s.reason; }),
+      notInCabSuggestions: cm.excluded.map(function (x) { return x.f.name + ' (' + x.f.flight + '): ' + x.reason; }),
+      dataProblems: d.errors && d.errors.length ? d.errors.slice(0, 5) : null
+    });
+    // Keep under the size limit: completed guests go first, then the list is cut with a note.
+    if (JSON.stringify(ctx).length > ASSISTANT_CONTEXT_CHARS) {
+      ctx.guests = guests.filter(function (g) { return g.phase !== 'completed'; });
+      ctx.notes.push('Guests whose trips are completed were left out to fit the size limit.');
+    }
+    while (JSON.stringify(ctx).length > ASSISTANT_CONTEXT_CHARS && ctx.guests.length) ctx.guests = ctx.guests.slice(0, Math.floor(ctx.guests.length * 0.8));
+    if (ctx.guests.length < guests.length) ctx.notes.push('Only ' + ctx.guests.length + ' of ' + guests.length + ' guests are included.');
+    return ctx;
+  }
+
+  function askAssistant(text) {
+    var q = String(text || '').trim();
+    if (!q || chat.busy) return;
+    bubble(q, 'user');
+    if (!state.data) { bubble('Flight data has not loaded yet. Try again in a moment.', 'error'); return; }
+    chat.messages.push({ role: 'user', content: q });
+    var payload = { messages: chat.messages.slice(), context: assistantContext() };
+    var typing = typingBubble();
+    setBusy(true);
+    google.script.run.withSuccessHandler(function (r) {
+      typing.remove();
+      var answer = r && r.text ? r.text : 'The model returned no answer.';
+      chat.messages.push({ role: 'assistant', content: answer });
+      bubble(answer, 'assistant');
+      setBusy(false);
+    }).withFailureHandler(function (e) {
+      typing.remove();
+      chat.messages.pop(); // an unanswered question is not part of the conversation the model sees next time
+      bubble('The assistant could not answer: ' + (e && e.message || e) + '. Check that Ollama is running (npm run assistant:health).', 'error');
+      chat.statusAt = 0; refreshAssistantStatus();
+      setBusy(false);
+    }).askAssistant(payload);
   }
   $('assistant-form').addEventListener('submit', function (ev) {
     ev.preventDefault();
-    var q = aInput.value.trim();
-    if (!q) return;
-    bubble(q, true); aInput.value = '';
-    var on = state.data && state.data.assistant && state.data.assistant.enabled;
-    if (!on || !(window.google && google.script)) {
-      bubble('The assistant is not connected yet, so nothing was sent.', false);
-      return;
-    }
-    google.script.run.withSuccessHandler(function (r) { bubble(r && r.text ? r.text : 'No answer.', false); })
-      .withFailureHandler(function (e) { bubble('The assistant failed: ' + (e && e.message || e), false); }).askAssistant(q);
+    var q = aInput.value;
+    if (!q.trim() || chat.busy) return;
+    aInput.value = '';
+    askAssistant(q);
   });
 
   // ===== EVENT BINDINGS =====

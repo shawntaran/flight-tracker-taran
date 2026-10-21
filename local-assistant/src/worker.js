@@ -110,8 +110,18 @@ function createWorker({ config, telegram, offsetStore, getSnapshot, llm, log, no
     log('INFO', 'answered chat ' + chatId + ' via ' + out.via + ' in ' + (now() - started) + ' ms' + (out.error ? ' (' + out.error + ')' : ''));
   }
 
+  let meTried = false;
+  async function ensureMe() {
+    if (meTried) return;
+    meTried = true;
+    const me = await telegram.getMe();
+    if (me.ok && me.result) botUsername = String(me.result.username || '');
+    else { meTried = false; log('WARN', 'getMe failed (' + me.error + '); group mentions are not recognised until it works'); }
+  }
+
   /** One getUpdates round. Returns the ms to wait before the next one. */
   async function pollOnce() {
+    await ensureMe();
     if (offset == null) {
       // First start (or lost offset file): skip the backlog instead of answering old questions.
       const r = await telegram.getUpdates(-1, 0);
@@ -148,9 +158,6 @@ function createWorker({ config, telegram, offsetStore, getSnapshot, llm, log, no
   }
 
   async function run() {
-    const me = await telegram.getMe();
-    if (me.ok && me.result) botUsername = String(me.result.username || '');
-    else log('WARN', 'getMe failed (' + me.error + '); group mentions will not be recognised');
     while (!stopped) {
       let wait;
       try { wait = await pollOnce(); } catch (e) { log('ERROR', 'poll failed: ' + ((e && e.message) || e)); wait = 5000; }

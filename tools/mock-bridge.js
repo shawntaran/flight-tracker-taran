@@ -21,6 +21,9 @@
     return p.weekday + ' ' + p.day + ' ' + p.month + ' ' + p.hour + ':' + p.minute;
   }
 
+  // Live sheet data by default; add ?mock=1 to the URL for the synthetic data below.
+  var USE_MOCK = /[?&]mock=1\b/.test(location.search);
+
   // Preview-only ETA overrides so the page can be shown reordering after a refresh. id -> ms | null | any value.
   var previewState = { eta: {} };
 
@@ -279,21 +282,20 @@
     };
   }
 
-  function mockAskAssistant(query) {
-    var q = String(query || '').toLowerCase().trim();
-    if (q.indexOf('delay') >= 0) {
-      return { text: 'Currently 2 flights are experiencing delays today: AI506 from DEL (delayed +25m, revised ETA approx. 25m from now) and 6E2134 from BOM (delayed +40m). Cab suggestions were recalculated; arrange transport manually.' };
-    }
-    if (q.indexOf('arrival') >= 0 || q.indexOf('summar') >= 0) {
-      return { text: "Today's BLR Arrival Overview: 7 arrivals scheduled in total. 1 has landed (QP1302 at T1), 2 are currently delayed (AI506 at T2 and 6E2134 at T1), and 3 are on-schedule (UK817, EK568, IX712). Active arrivals are distributed between Terminal 1 and Terminal 2." };
-    }
-    if (q.indexOf('cab') >= 0 || q.indexOf('group') >= 0 || q.indexOf('adjust') >= 0) {
-      return { text: 'Cab suggestions for AI506 and 6E2134 changed after their delays. Suggestions only: arrange transport manually outside the app.' };
-    }
-    if (q.indexOf('unknown') >= 0 || q.indexOf('status') >= 0) {
-      return { text: 'All active flights currently have verified telemetry via OpenSky Network ADS-B and AeroDataBox. F110 (6E982) has UNKNOWN status due to a rate-limit error — will retry next tick.' };
-    }
-    return { text: 'Operations Assistant (Local Preview): Received "' + query + '". 9 flights actively monitored, cab suggestions recalculated each tick, and sync engine is running with 5-minute ticks.' };
+  /** The Operations Assistant: the preview server sends {messages, context} to the configured model (tools/ops-assistant.js). */
+  function postAssistant(payload) {
+    return fetch('/api/assistant', {
+      method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok || j.error) throw new Error(j.error || 'HTTP ' + r.status);
+        return { text: String(j.text || '') };
+      });
+    });
+  }
+
+  function getAssistantStatus() {
+    return fetch('/api/assistant/status', { cache: 'no-store' }).then(function (r) { return r.json(); });
   }
 
   function createRunner(successHandler, failureHandler) {
@@ -301,6 +303,20 @@
       withSuccessHandler: function (cb) { return createRunner(cb, failureHandler); },
       withFailureHandler: function (cb) { return createRunner(successHandler, cb); },
       getDashboardData: function () {
+        if (!USE_MOCK) {
+          // Live: the preview server reads the sheet's "Import" tab. Errors go to the page's failure banner.
+          fetch('/api/dashboard-data', { cache: 'no-store' }).then(function (r) {
+            return r.json().then(function (j) {
+              if (!r.ok || j.error) throw new Error(j.error || 'HTTP ' + r.status);
+              return j;
+            });
+          }).then(function (d) {
+            if (typeof successHandler === 'function') successHandler(d);
+          }).catch(function (err) {
+            if (typeof failureHandler === 'function') failureHandler(err);
+          });
+          return;
+        }
         setTimeout(function () {
           try {
             if (typeof successHandler === 'function') successHandler(getMockDashboardData());
@@ -309,14 +325,19 @@
           }
         }, 80);
       },
-      askAssistant: function (q) {
-        setTimeout(function () {
-          try {
-            if (typeof successHandler === 'function') successHandler(mockAskAssistant(q));
-          } catch (err) {
-            if (typeof failureHandler === 'function') failureHandler(err);
-          }
-        }, 120);
+      askAssistant: function (payload) {
+        postAssistant(payload).then(function (r) {
+          if (typeof successHandler === 'function') successHandler(r);
+        }).catch(function (err) {
+          if (typeof failureHandler === 'function') failureHandler(err);
+        });
+      },
+      getAssistantStatus: function () {
+        getAssistantStatus().then(function (s) {
+          if (typeof successHandler === 'function') successHandler(s);
+        }).catch(function (err) {
+          if (typeof failureHandler === 'function') failureHandler(err);
+        });
       }
     };
   }
@@ -327,11 +348,12 @@
     withSuccessHandler: function (cb) { return createRunner(cb, null); },
     withFailureHandler: function (cb) { return createRunner(null, cb); },
     getDashboardData: function () { createRunner(null, null).getDashboardData(); },
-    askAssistant: function (q) { createRunner(null, null).askAssistant(q); }
+    askAssistant: function (p) { createRunner(null, null).askAssistant(p); },
+    getAssistantStatus: function () { createRunner(null, null).getAssistantStatus(); }
   };
 
   window.__FT_PREVIEW__ = {
-    getData: getMockDashboardData, ask: mockAskAssistant,
+    getData: getMockDashboardData,
     // setEta('F104', Date.now() + 20 * 60000) | setEta('F104', null) | setEta('F104', 'garbage'); then refresh.
     setEta: function (id, value) { previewState.eta[id] = value; },
     shiftEta: function (id, minutes) {

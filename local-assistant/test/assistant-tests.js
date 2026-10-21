@@ -139,7 +139,7 @@ test('columns are found by header name, and malformed values are parsed safely',
   assert.deepStrictEqual([ivy.status, ivy.statusNote, ivy.schedMs, ivy.latestMs], ['UNKNOWN', 'unrecognised status on the sheet', null, null]);
   assert.ok(!/\n/.test(ivy.name) && ivy.name.length <= 60, 'sheet text is single-line and capped');
   assert.strictEqual(by['6E123'].dir, 'departure');
-  assert.strictEqual(SNAP.flights.length, 11);
+  assert.strictEqual(SNAP.flights.length, 10, '11 rows, one inactive');
 });
 test('missing or unreadable sheets become problems, never exceptions', async () => {
   const s1 = buildSnapshot({ flights: { missing: true } }, NOW);
@@ -158,10 +158,10 @@ test('snapshot source: a failed refresh reuses the last good data, labelled with
   const logs = [];
   const get = createSnapshotSource({ spreadsheetId: 's', now: () => t, ttlMs: 60000, log: (l, m) => logs.push(m),
     readRange: async (id, name) => { if (fail) throw new Error('HTTP 500'); return RAW[name.toLowerCase()]; } });
-  assert.strictEqual((await get()).flights.length, 11);
+  assert.strictEqual((await get()).flights.length, 10);
   fail = true; t += 2 * MIN;
   const s = await get();
-  assert.ok(s.flights.length === 11 && /could not be refreshed; it was read at Wed 21 Oct 08:00 IST/.test(s.problems[0]));
+  assert.ok(s.flights.length === 10 && /could not be refreshed; it was read at Wed 21 Oct 08:00 IST/.test(s.problems[0]));
 });
 
 // ---------------------------------------------------------------- answers
@@ -198,7 +198,7 @@ test('cab output is always a suggestion: deterministic text, and a model answer 
   assert.ok(/suggestion only, not booked/.test(await cmd('/flight EK568')));
   const booked = await A.answer('Which arrivals could share a cab?', deps(okLlm('Cab A-BLR-T2-1021-1 is booked for EK568 and QR572 at 09:15 IST.')));
   assert.strictEqual(booked.via, 'fallback');
-  assert.ok(/suggestions only/.test(booked.text) && !/is booked/.test(booked.text));
+  assert.ok(/suggestions only/.test(booked.text) && !/is booked for/.test(booked.text));
   const good = await A.answer('Which arrivals could share a cab?', deps(okLlm('EK568 (Dr Asha Sharma) and QR572 (Dr Ben Okafor) could share a cab: suggested pickup Wed 21 Oct 09:15 IST.')));
   assert.strictEqual(good.via, 'llm');
   assert.ok(/Cab groupings are the tracker's suggestions only; nothing is booked\.$/.test(good.text));
@@ -261,14 +261,14 @@ function mkWorker(tg, opts) {
   const logs = [];
   const { config } = buildConfig(Object.assign({}, BASE, { LLM_MODEL: 'm', RATE_LIMIT_PER_MIN: String(opts.rate || 6) }));
   const store = createOffsetStore(path.join(dir, 'telegram-offset.json'));
+  if (opts.offset != null) store.save(opts.offset);
   const w = createWorker({ config, telegram: tg, offsetStore: store, getSnapshot: opts.getSnapshot || (async () => SNAP),
     llm: opts.llm || okLlm('Dr Asha Sharma (EK568) is expected Wed 21 Oct 08:35 IST.'), log: (l, m) => logs.push(l + ' ' + m), now: () => NOW, sleep: async () => {} });
   return { w, store, dir, logs };
 }
 test('authorised chats get answers; unknown chats get no tracker information (and only one notice a day)', async () => {
   const tg = fakeTelegram([[msg(5, 111, 'When is Dr Sharma arriving?'), msg(6, 999, 'Where is EK568?'), msg(7, 999, '/delayed'), msg(8, -100777, '/delayed')]]);
-  const { w, store, logs } = mkWorker(tg);
-  store.save(5);
+  const { w, logs } = mkWorker(tg, { offset: 5 });
   await w.pollOnce();
   assert.strictEqual(tg.sent.length, 2, JSON.stringify(tg.sent));
   assert.ok(tg.sent[0][0] === '111' && /EK568/.test(tg.sent[0][1]));
@@ -279,8 +279,7 @@ test('authorised chats get answers; unknown chats get no tracker information (an
 });
 test('offset is persisted before handling: a restart never handles an update twice', async () => {
   const tg1 = fakeTelegram([[msg(10, 111, '/help'), msg(11, 111, '/delayed')]]);
-  const a = mkWorker(tg1);
-  a.store.save(10);
+  const a = mkWorker(tg1, { offset: 10 });
   await a.w.pollOnce();
   assert.deepStrictEqual(tg1.polls[0], [10, 25]);
   assert.strictEqual(JSON.parse(fs.readFileSync(path.join(a.dir, 'telegram-offset.json'), 'utf8')).offset, 12);
@@ -306,10 +305,20 @@ test('first start without an offset skips the backlog instead of answering old q
   fs.writeFileSync(path.join(dir, 'bad.json'), '{oops');
   assert.strictEqual(createOffsetStore(path.join(dir, 'bad.json')).load(), null, 'a corrupt file is treated as missing');
 });
+test('setup mode: with ALLOWED_CHAT_IDS empty the worker starts, answers nobody and tells each private chat its id', async () => {
+  const { config, problems } = buildConfig(Object.assign({}, BASE, { ALLOWED_CHAT_IDS: '' }));
+  assert.ok(!problems.some((p) => p.level === 'error'), 'not a start-blocking error');
+  assert.ok(problems.some((p) => p.key === 'ALLOWED_CHAT_IDS' && /setup mode/.test(p.message)));
+  const tg = fakeTelegram([[msg(1, 111, 'Who is delayed?'), msg(2, -100500, '/delayed')]]);
+  const w = createWorker({ config, telegram: tg, offsetStore: { load: () => 1, save() {} }, getSnapshot: async () => SNAP,
+    llm: okLlm('EK568 is delayed.'), log: () => {}, now: () => NOW, sleep: async () => {} });
+  await w.pollOnce();
+  assert.deepStrictEqual(tg.sent.map((s) => s[0]), ['111'], 'groups get nothing');
+  assert.ok(/Your chat id is 111/.test(tg.sent[0][1]) && !/EK568|Sharma|DELAYED/.test(tg.sent[0][1]));
+});
 test('per-chat rate limit, and in groups only messages addressed to the bot', async () => {
   const tg = fakeTelegram([[1, 2, 3, 4].map((i) => msg(i, 111, '/help')).concat([msg(7, -100500, 'who is delayed?'), msg(8, -100500, '@ft_bot /delayed')])]);
-  const { w, store } = mkWorker(tg, { rate: 2 });
-  store.save(1);
+  const { w } = mkWorker(tg, { rate: 2, offset: 1 });
   await w.pollOnce();
   const to = (id) => tg.sent.filter((s) => s[0] === id).map((s) => s[1]);
   assert.strictEqual(to('111').length, 3, 'two answers and one slow-down notice');
@@ -319,16 +328,14 @@ test('per-chat rate limit, and in groups only messages addressed to the bot', as
 });
 test('length limit and offline-message notice for allowed chats', async () => {
   const tg = fakeTelegram([[msg(1, 111, 'x'.repeat(600)), msg(2, 111, '/help', { date: Math.floor((NOW - 2 * 60 * MIN) / 1000) })]]);
-  const { w, store } = mkWorker(tg);
-  store.save(1);
+  const { w } = mkWorker(tg, { offset: 1 });
   await w.pollOnce();
   assert.ok(/under 500 characters/.test(tg.sent[0][1]) && /offline when you sent this/.test(tg.sent[1][1]));
 });
 test('the worker never crashes: Telegram, sheet and send failures are logged and polling continues', async () => {
   const tg = fakeTelegram([new Error('getaddrinfo ENOTFOUND api.telegram.org'), [msg(1, 111, 'Where is EK568?'), msg(2, 111, '/cabs')]]);
   tg.sendMessage = async () => ({ ok: false, error: 'HTTP 403 Forbidden' });
-  const { w, store, logs } = mkWorker(tg, { getSnapshot: async () => { throw new Error('boom'); } });
-  store.save(1);
+  const { w, logs } = mkWorker(tg, { offset: 1, getSnapshot: async () => { throw new Error('boom'); } });
   const wait = await w.pollOnce();
   assert.ok(wait > 0 && logs.some((l) => /getUpdates failed/.test(l)));
   assert.strictEqual(await w.pollOnce(), 0);
@@ -374,7 +381,10 @@ test('Google: read-only scope, GET-only Sheets reads, token refresh, missing tab
     } });
   assert.strictEqual((await g.readRange('sheet123', 'Flights')).rows.length, FLIGHTS.length);
   assert.deepStrictEqual(await g.readRange('sheet123', 'Groups'), { missing: true });
-  await assert.rejects(g.readRange('sheet123', 'Config'), /HTTP 403 \(no access: share the sheet/);
+  await assert.rejects(g.readRange('sheet123', 'Config'), /HTTP 403 \(the authorised Google account cannot open this spreadsheet/);
+  const disabled = createGoogle({ clientId: 'c', clientSecret: FAKE_SECRET, tokenFile, now: () => NOW, redact: makeRedactor([]),
+    fetch: async () => fakeRes(403, { error: { code: 403, status: 'PERMISSION_DENIED', message: 'Google Sheets API has not been used in project 123 before or it is disabled.', details: [{ reason: 'SERVICE_DISABLED' }] } }) });
+  await assert.rejects(disabled.readRange('sheet123', 'Flights'), /Sheets API is not enabled in your Cloud project/);
   const sheetCalls = calls.filter((c) => /sheets\.googleapis/.test(c.url));
   assert.ok(sheetCalls.every((c) => c.method === 'GET' && /\/values\//.test(c.url) && c.auth === 'Bearer ya29.new'), JSON.stringify(sheetCalls));
   assert.strictEqual(calls.filter((c) => /oauth2/.test(c.url)).length, 1, 'refreshed once, then reused');

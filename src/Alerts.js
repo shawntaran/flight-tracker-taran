@@ -529,8 +529,9 @@ function listTelegramChats() {
   if (res.networkError != null) throw new Error('Could not reach Telegram: ' + res.networkError);
   if (res.code === 401 || res.code === 404) throw new Error('Telegram rejected TG_BOT_TOKEN (HTTP ' + res.code + '). Check the Script Property.');
   if (res.code === 409) {
-    throw new Error('This bot has a webhook, so another program receives its messages and this list cannot be read (HTTP 409). ' +
-      'Alerts are not affected. Ask whoever runs that webhook for the chat ids; do not remove it unless it is yours.');
+    throw new Error('Another program is reading this bot\'s messages (a webhook, or the local Telegram assistant), so this list cannot be read (HTTP 409). ' +
+      'Alerts are not affected. If the local assistant runs, a person who messages the bot is told their chat id. ' +
+      'Otherwise ask whoever runs that webhook for the chat ids; do not remove it unless it is yours.');
   }
   if (res.code !== 200) throw new Error('Telegram returned HTTP ' + res.code + '.');
   var chats = tgChatsFromUpdates_(res.body);

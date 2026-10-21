@@ -8,9 +8,18 @@ const { MIN, parseTime } = require('./time');
 const KNOWN_STATUS = ['SCHEDULED', 'DELAYED', 'DEPARTED', 'LANDED', 'CANCELLED', 'DIVERTED', 'UNKNOWN'];
 const FINAL = { arrival: ['LANDED', 'CANCELLED', 'DIVERTED'], departure: ['DEPARTED', 'CANCELLED', 'DIVERTED'] };
 
+// Control characters (0-31, 127) and the Unicode line/paragraph separators (8232, 8233), built from
+// char codes so no escape sequence can be altered by editors or tools.
+const CONTROL_CODES = [127, 8232, 8233];
+for (let c = 0; c < 32; c++) CONTROL_CODES.push(c);
+const CONTROL_SET = new Set(CONTROL_CODES);
+
 /** Plain, single-line, length-capped text: sheet cells are untrusted. */
 function clean(v, max) {
-  return String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f  ]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max || 60);
+  const s = String(v == null ? '' : v);
+  let out = '';
+  for (let i = 0; i < s.length; i++) out += CONTROL_SET.has(s.charCodeAt(i)) ? ' ' : s[i];
+  return out.split(' ').filter(Boolean).join(' ').trim().slice(0, max || 60);
 }
 
 function table(rows) {
@@ -21,8 +30,8 @@ function table(rows) {
 }
 
 function normFlight(s) {
-  const t = String(s || '').toUpperCase().replace(/[\s-]/g, '');
-  const m = t.match(/^([A-Z]{2,3}|[A-Z]\d|\d[A-Z])0*(\d{1,4})$/);
+  const t = String(s || '').toUpperCase().split(' ').join('').split('-').join('');
+  const m = t.match(/^([A-Z]{2,3}|[A-Z][0-9]|[0-9][A-Z])0*([0-9]{1,4})$/);
   return m ? m[1] + m[2] : t;
 }
 
@@ -49,7 +58,7 @@ function liveState(etaSource, lastFix, nowMs, staleMin, airport) {
   const age = (nowMs - lastFix) / MIN;
   if (age < -5) return { state: 'unavailable', note: 'the recorded position time is in the future' };
   if (age <= staleMin && /^live/i.test(etaSource)) {
-    const km = etaSource.match(/(\d+)\s*km out/i);
+    const km = etaSource.match(/([0-9]+) ?km out/i);
     return { state: 'fresh', summary: km ? 'about ' + km[1] + ' km from ' + airport : 'airborne, seen by OpenSky', asOf: lastFix, ageMin: Math.max(0, Math.round(age)) };
   }
   return { state: 'stale', asOf: lastFix, ageMin: Math.round(age) };

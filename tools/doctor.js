@@ -29,7 +29,7 @@ else warn('clasp', 'not installed. Needed only to deploy with clasp: npm install
 // 2. Expected files
 const expected = ['src/appsscript.json', 'src/AdbClient.js', 'src/Alerts.js', 'src/Config.js', 'src/Diagnostics.js',
   'src/Dashboard.js', 'src/DashboardPage.html', 'src/Grouping.js', 'src/Menu.js', 'src/Providers.js', 'src/Sheet.js', 'src/Tracker.js', 'src/Util.js',
-  'test/run-tests.js', 'test/adb-tests.js', 'test/setup-tests.js', 'test/dashboard-tests.js', 'test/telegram-tests.js', 'README.md', 'AUDIT.md', 'PROJECT_STATUS.md',
+  'test/run-tests.js', 'test/adb-tests.js', 'test/setup-tests.js', 'test/dashboard-tests.js', 'test/telegram-tests.js', 'local-assistant/src/main.js', 'local-assistant/test/assistant-tests.js', 'local-assistant/.env.local-assistant.example', 'local-assistant/README.md', 'README.md', 'AUDIT.md', 'PROJECT_STATUS.md',
   '.gitignore', '.env.example', '.clasp.json.example', 'package.json'];
 const missing = expected.filter((f) => !fs.existsSync(path.join(ROOT, f)));
 if (missing.length) fail('Files', 'missing: ' + missing.join(', '));
@@ -103,10 +103,11 @@ else {
   const init = git(['init', '-q']);
   if (init.status !== 0) problem = 'git init failed: ' + firstLine(init);
   else if (String(git(['rev-parse', '--git-dir']).stdout).trim() !== '.git') problem = 'throwaway repository is not isolated';
-  const mustIgnore = ['.env', '.env.local', '.env.production', '.clasprc.json', '.clasp.json', 'node_modules/x.js',
+  const mustIgnore = ['.env', '.env.local', '.env.production', 'local-assistant/.env.local-assistant', 'local-assistant/.state/telegram-offset.json', 'local-assistant/.state/google-token.json', '.clasprc.json', '.clasp.json', 'node_modules/x.js',
     'ITW Faculty Travel Details.xlsx', 'export.csv', 'client_secret_123.json', 'debug.log'];
   const mustKeep = ['.env.example', '.clasp.json.example', 'src/Config.js', 'src/appsscript.json', 'package.json',
-    'README.md', 'PROJECT_STATUS.md', 'tools/doctor.js', 'test/adb-tests.js'];
+    'README.md', 'PROJECT_STATUS.md', 'tools/doctor.js', 'test/adb-tests.js',
+    'local-assistant/.env.local-assistant.example', 'local-assistant/src/worker.js'];
   const ignored = (p) => {
     if (problem) return null;
     const r = git(['check-ignore', '-q', '--no-index', p]);
@@ -132,7 +133,7 @@ const inRepo = gitOk && spawnSync('git', ['rev-parse', '--is-inside-work-tree'],
 if (!inRepo) warn('Git', 'not a git repository yet: nothing is tracked. After "git init", run this again');
 else {
   const tracked = spawnSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' }).stdout.split(/\r?\n/).filter(Boolean);
-  const bad = tracked.filter((f) => /(^|\/)\.env(\.|$)(?!example$)|\.clasprc\.json$|(^|\/)\.clasp\.json$|\.(pem|p12|key|xlsx|xls|csv)$|client_secret|credentials.*\.json$/.test(f) && !f.endsWith('.env.example'));
+  const bad = tracked.filter((f) => /(^|\/)\.env(\.|$)(?!example$)|\.clasprc\.json$|(^|\/)\.clasp\.json$|\.(pem|p12|key|xlsx|xls|csv)$|client_secret|credentials.*\.json$/.test(f) && !f.endsWith('.example'));
   if (bad.length) fail('Git', 'sensitive files are TRACKED (rotate any keys inside, then git rm --cached): ' + bad.join(', '));
   else ok('Git', tracked.length + ' tracked files, none sensitive');
 }
@@ -140,7 +141,7 @@ else {
 // 8. Credential-shaped strings in project files (values are never printed)
 const patterns = [['Telegram bot token', /\b\d{6,12}:[A-Za-z0-9_-]{30,}\b/], ['RapidAPI key', /\b[0-9a-z]{18,}msh[0-9a-z]{10,}\b/i],
   ['long hex key', /\b[0-9a-f]{40,}\b/i], ['assigned secret', /\b(KEY|TOKEN|SECRET)\s*[=:]\s*["']?[A-Za-z0-9_\-:]{20,}/]];
-const skipDirs = new Set(['node_modules', '.git']);
+const skipDirs = new Set(['node_modules', '.git', '.state']); // .state: the local assistant's own git-ignored OAuth token
 const hits = [];
 (function walk(dir) {
   for (const name of fs.readdirSync(dir)) {
@@ -174,7 +175,7 @@ registry.forEach((n) => delete env[n]);
 // DOCTOR_SKIP_TESTS=1 lets a test run the doctor's other checks without the doctor re-running the tests.
 const skipTests = process.env.DOCTOR_SKIP_TESTS === '1';
 if (skipTests) warn('Tests', 'skipped (DOCTOR_SKIP_TESTS=1)');
-for (const t of skipTests ? [] : ['test/run-tests.js', 'test/adb-tests.js', 'test/setup-tests.js', 'test/dashboard-tests.js', 'test/telegram-tests.js']) {
+for (const t of skipTests ? [] : ['test/run-tests.js', 'test/adb-tests.js', 'test/setup-tests.js', 'test/dashboard-tests.js', 'test/telegram-tests.js', 'local-assistant/test/assistant-tests.js']) {
   if (!fs.existsSync(path.join(ROOT, t))) continue;
   const r = spawnSync(process.execPath, [path.join(ROOT, t)], { cwd: ROOT, env, encoding: 'utf8' });
   const summary = (String(r.stdout).match(/(\d+) passed, (\d+) failed/) || [])[0] || 'no summary';

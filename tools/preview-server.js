@@ -12,6 +12,7 @@ const MOCK_BRIDGE_PATH = path.join(__dirname, 'mock-bridge.js');
 // Preview-only browser modules served as-is (fixed list: no path from the URL reaches the file system).
 const PREVIEW_MODULES = {
   '/flight-sort.js': path.join(__dirname, 'flight-sort.js'),
+  '/guest-view.js': path.join(__dirname, 'guest-view.js'),
   '/flight-position.js': path.join(__dirname, 'flight-position.js'),
   '/cab-suggestions.js': path.join(__dirname, 'cab-suggestions.js')
 };
@@ -25,6 +26,53 @@ function getGroupingBundle() {
 }
 
 const defaultPort = parseInt(process.env.PORT || '3000', 10);
+
+// Live data for the preview: the "Import" tab, read server-side (see tools/import-source.js). Built lazily so
+// the server still starts, and ?mock=1 still works, without the local assistant's Google setup.
+let importSource = null;
+function getImportData() {
+  try {
+    importSource = importSource || require('./import-source').createImportSource();
+  } catch (err) {
+    return Promise.reject(err);
+  }
+  return importSource();
+}
+
+// Operations Assistant: the model from local-assistant/.env.local-assistant (see tools/ops-assistant.js). Lazy for the same reason.
+const ASSISTANT_MAX_BODY = 256 * 1024;
+let opsAssistant = null;
+function getOpsAssistant() {
+  opsAssistant = opsAssistant || require('./ops-assistant').createOpsAssistant();
+  return opsAssistant;
+}
+
+function sendJson(res, status, obj) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(obj));
+}
+
+/** POST /api/assistant {messages, context} -> {text} | {error}. JSON only, so other sites cannot post here without a CORS preflight (never answered). */
+function handleAssistant(req, res) {
+  if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
+  if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON only' });
+  let body = '', tooBig = false;
+  req.setEncoding('utf8');
+  req.on('data', (chunk) => {
+    if (tooBig) return;
+    body += chunk;
+    if (body.length > ASSISTANT_MAX_BODY) { tooBig = true; sendJson(res, 413, { error: 'request too large' }); }
+  });
+  req.on('end', () => {
+    if (tooBig) return;
+    let parsed;
+    try { parsed = JSON.parse(body); } catch (e) { return sendJson(res, 400, { error: 'invalid JSON' }); }
+    Promise.resolve().then(() => getOpsAssistant().ask(parsed)).then((r) => {
+      if (r.ok) sendJson(res, 200, { text: r.text });
+      else sendJson(res, 502, { error: r.error });
+    }).catch((err) => sendJson(res, 500, { error: String(err && err.message || err) }));
+  });
+}
 
 function getMockBridgeContent() {
   return fs.readFileSync(MOCK_BRIDGE_PATH, 'utf8');
@@ -98,6 +146,29 @@ function handleRequest(req, res) {
       res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('Error loading mock bridge: ' + err.message);
     }
+    return;
+  }
+
+  if (pathname === '/api/dashboard-data') {
+    getImportData().then((data) => {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(data));
+    }).catch((err) => {
+      res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ error: String(err && err.message || err) }));
+    });
+    return;
+  }
+
+  if (pathname === '/api/assistant') {
+    handleAssistant(req, res);
+    return;
+  }
+
+  if (pathname === '/api/assistant/status') {
+    Promise.resolve().then(() => getOpsAssistant().status())
+      .then((s) => sendJson(res, 200, s))
+      .catch((err) => sendJson(res, 200, { online: false, model: '', detail: String(err && err.message || err) }));
     return;
   }
 

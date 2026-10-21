@@ -158,6 +158,13 @@ Green columns are yours. Blue columns are written by the script. Hidden `m:` col
 
 **Cabs:** people on the same direction, airport and terminal share a cab when they're within `GROUP_WINDOW_MIN` (45 min) of the first person, up to `MAX_SEATS`. Arrival pickup is the last ETA + 40 min. Departure pickup is the earliest check-in − 90 min. A driver typed on **Groups** follows their group when it's re-planned.
 
+## Asking questions in Telegram (optional local assistant)
+
+[`local-assistant/`](local-assistant/README.md) is a separate Node.js worker. It answers coordinators' questions in Telegram ("Who is delayed?", "Where is EK568 right now?") from the sheet, read-only, using a language model you choose: local Ollama, a LAN machine, or a university DGX. It runs on a computer you control, not in Apps Script.
+
+- If it stops, every automatic alert still goes out; only the question answering pauses.
+- Setup, the DGX notes and the health check are in [local-assistant/README.md](local-assistant/README.md).
+
 ## Telegram alerts: how delivery works
 
 - **One message per tick.** All coordinator alerts from one 5-minute check are combined into one Telegram message per chat, plus one email. Drivers and faculty get their own messages.
@@ -212,7 +219,7 @@ Green columns are yours. Blue columns are written by the script. Hidden `m:` col
 | `UNCONFIRMED` rows | A network error hid the outcome. Check with the recipient; the script won't resend, to avoid duplicates |
 | "Telegram Deliveries sheet unavailable" (ERROR in Log) | The sheet is protected or was broken. Messages still go out once, but without retries. Remove the protection or delete the sheet (it's recreated) |
 | "Show Telegram chat ids" says no messages | Ask people to send `/start` first. In groups, send `/start@YourBotName`. Telegram keeps these for 24 h only, so run it soon after |
-| "Show Telegram chat ids": "This bot has a webhook" (HTTP 409) | Another program serves this bot. Alerts still work. Ask its owner for the chat ids, or use a separate bot for this tracker. Don't delete someone else's webhook |
+| "Show Telegram chat ids": "Another program is reading this bot's messages" (HTTP 409), or an empty list while the local assistant runs | The [local assistant](local-assistant/README.md) or a webhook reads the bot's messages. Alerts still work. With the assistant, have the person message the bot: it replies with their chat id. Otherwise ask the webhook's owner, or use a separate bot. Don't delete someone else's webhook |
 | The same alert arrived twice | A timeout hid a successful delivery and the one retry resent it (state `UNCONFIRMED` or `SENT` with 2 attempts). Expected, and rare |
 | No emails | Check `COORD_EMAILS` and `EMAIL_ALERTS`. Consumer Gmail allows 100 emails a day |
 | Flight shows **UNKNOWN**, "lookup not performed" | AeroDataBox is out of budget or suspended. Run **Show API usage** |
@@ -234,7 +241,7 @@ npm test
 npm run doctor
 ```
 
-- **`npm test`** runs five suites: core logic, the AeroDataBox budget, setup/secrets, the dashboard, and Telegram delivery (every Telegram answer is faked).
+- **`npm test`** runs every suite under `test/`, plus the local assistant's (`local-assistant/test/`). Every external service is faked.
 - **`npm run doctor`** adds the repository checks.
 - **Isolation:** every external service is faked, and the application code runs in a sandbox with no access to environment variables, so a key on your machine can never trigger a real request.
 - **Structure and where to start:** see [PROJECT_STATUS.md](PROJECT_STATUS.md).

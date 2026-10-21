@@ -1,6 +1,6 @@
 # PROJECT_STATUS: Faculty Flight Tracker
 
-*Handoff document for people and AI agents. Last updated: 2026-10-20: hardening pass, then the Flight Tracking, UI Design and Telegram Bot Setup workstreams (§14).*
+*Handoff document for people and AI agents. Last updated: 2026-10-21 (status refresh: git state, assistant test count, repo map; §8, §11, §14): hardening pass, then the Flight Tracking, UI Design and Telegram Bot Setup workstreams (§14).*
 
 **Treat this as a map, not as proof.** Check the code before relying on any claim here, and update this file when you finish a task.
 
@@ -121,6 +121,7 @@ All files in `src/` share one global scope, as Apps Script requires. Every top-l
 │   ├── Diagnostics.js     Check setup (no API calls) and Test a flight lookup (one budgeted request)
 │   ├── Menu.js            onOpen menu, triggers, cab-plan send, usage/sync/resume dialogs, Excel import
 │   └── Util.js            IST/UTC helpers, flight-number normalisation, airline table, haversine
+├── local-assistant/       Optional Telegram assistant worker (Node 18+, no dependencies; §14)
 ├── test/                  Node tests; real src in a vm sandbox, all external services faked
 │   ├── run-tests.js       Core: normalisation, time, parsing, ETA, grouping, lifecycle, one runTick_ test
 │   ├── adb-tests.js       AeroDataBox budget: limits, tiers, failures, dedupe, window, migration, D1–D5
@@ -178,7 +179,7 @@ Not in the repository, deliberately: `.clasp.json` (yours), `.env` (optional, pe
 - The optional Gemini/Groq chat layer (spec: "optional"; messages use fixed templates). The dashboard has the assistant panel, but it answers nothing until a backend exists (hook in §14).
 - Live ETAs for airports outside `AIRPORTS` (BLR, MAA, BOM, DEL, HYD, COK).
 - WhatsApp, which is out of scope because it isn't free.
-- CI. A git repository now exists, but it has no commits or remote yet; see §14.
+- CI. The repository has one commit (`2d88446`) and `origin` set to `github.com/shawntaran/flight-tracker-taran`. Its workflow is not written yet (task T8). At the 2026-10-21 refresh, 15 tracked files were modified and `local-assistant/README.md` was untracked; none of this is committed.
 
 **Blocked by an external decision or dependency** (the five questions for Siva sir; the answers map to Config keys):
 1. Who gets alerts, and on which channel?
@@ -329,17 +330,19 @@ npm test
 npm run doctor
 ```
 
-**Latest run** (2026-10-20, Node v25.8.1, Windows):
+**Latest run** (2026-10-21, Node v25.8.1, Windows; `npm test` exit 0, `npm run doctor` no errors, no warnings):
 
 | Suite | Result |
 |---|---|
 | `test/run-tests.js` | 57 passed, 0 failed (Flight Tracking: 9 first-leg tests, then 25 provider-hardening tests) |
+| `local-assistant/test/assistant-tests.js` | 24 passed, 0 failed (in `npm test` and the doctor) |
 | `test/adb-tests.js` | 49 passed, 0 failed |
 | `test/setup-tests.js` | 20 passed, 0 failed (1 doctor-isolation test added by Flight Tracking) |
 | `test/dashboard-tests.js` | 15 passed, 0 failed (new, UI Design) |
 | `test/telegram-tests.js` | 34 passed, 0 failed (new, Telegram Bot Setup) |
 | `test/flight-sort-tests.js` | 18 passed, 0 failed (in `npm test`; not run by the doctor) |
 | `test/flight-position-tests.js` | 8 passed, 0 failed (in `npm test`; not run by the doctor) |
+| `test/cab-suggestions-tests.js` | 7 passed, 0 failed (in `npm test`; not run by the doctor) |
 | `npm run doctor` | 0 errors, 0 warnings (clasp 3.4.1 installed, `.clasp.json` present). 25 expected files, 5 suites. Latest run: 2026-10-20, after the Flight Tracking provider hardening |
 
 **What the tests do establish:**
@@ -416,6 +419,7 @@ This conversation built the project, then audited and hardened it in passes.
 - **This hardening pass.**
 - **Later, Flight Tracking workstream:** first-leg leg selection. Files: `src/Tracker.js`, `src/Providers.js`, `test/run-tests.js`; details in §14.
 - **Later, Flight Tracking workstream:** provider hardening: attempt accounting, flight identity, first-leg retries, terminal/gate freshness, parser resilience and the doctor `.gitignore` checker. Files: `src/Providers.js`, `src/Tracker.js`, `tools/doctor.js`, `test/run-tests.js`, `test/setup-tests.js`, `README.md` (2 troubleshooting rows); details in §14.
+- **Later, Telegram Bot Setup workstream: local Telegram assistant** (`local-assistant/`). A separate Node.js worker answers coordinators' questions from the sheet, read-only, through any OpenAI-compatible model endpoint. Details in §14 "Local Telegram assistant".
 - **Later, Telegram Bot Setup workstream:** delivery tracking, retries, the repeat filter, splitting, chat-id validation and Telegram diagnostics. Files: `src/Alerts.js`, small edits to `src/Diagnostics.js` and `src/Menu.js`, new `test/telegram-tests.js`, test-harness stubs in `test/run-tests.js`, `test/adb-tests.js` and `test/setup-tests.js`, one-line edits to `package.json` and `tools/doctor.js`, the README Telegram sections and this file. Details in §14.
 - **Later, UI Design workstream:** Overview dashboard web app. New files: `src/Dashboard.js`, `src/DashboardPage.html`, `test/dashboard-tests.js`. One-line edits: `src/Menu.js`, `package.json`, `tools/doctor.js`. Also `src/appsscript.json` (`webapp` section), a README section and this file. Details in §14.
 
@@ -438,6 +442,8 @@ Files changed **in this hardening pass**:
 | `README.md` | Rewritten as a step-by-step setup and operating guide, with a troubleshooting table |
 | `AUDIT.md` | Hardening addendum S1–S3, C1–C2 |
 | `PROJECT_STATUS.md` (new) | This file |
+
+**2026-10-21 status refresh** (no code changes): re-ran `npm test` and `npm run doctor` and corrected the figures above. Corrected two statements: the repository has a remote and one commit (not "no commits or remote"), and the assistant suite has 24 tests (not 23). Added `local-assistant/` to the repository map. Nothing has been committed.
 
 ## 12. Remaining work and suggested task allocation
 
@@ -505,6 +511,31 @@ Three Claude Code sessions share this working folder. They are not in separate g
    - **Personal data:** flights carry names only; phone, email and Telegram ids are never sent to the browser.
    - **For other workstreams:** if you rename a status, a `COLS` key or a Groups column, update `buildDashboardData_` and its tests.
 9. **Assistant hook (for T6):** the page calls a server function `askAssistant(question) → {text}` only when one exists (`assistant.enabled` is `typeof askAssistant === 'function'`). Until then it sends nothing anywhere.
+
+**Local Telegram assistant** (2026-10-20, Telegram Bot Setup; verified locally with every external service faked):
+- **What:** `local-assistant/`, a dependency-free Node.js 18+ worker run by the owner on their own machine (`npm run assistant`). It answers questions from `ALLOWED_CHAT_IDS` only. Automatic alerts stay in Apps Script and don't depend on it. Setup guide: [local-assistant/README.md](local-assistant/README.md).
+- **Architecture:**
+  - Telegram long-polling (`getUpdates` only; no webhook). The offset is saved *before* each update is handled, in `local-assistant/.state/telegram-offset.json`. First start skips the backlog.
+  - Google Sheets is read with OAuth scope `spreadsheets.readonly`: GET `values/'Flights'|'Groups'|'Config'`, cached 60 s, reading columns **by header name**.
+  - Sanitised snapshot → minimal per-question context → OpenAI-compatible `POST {LLM_BASE_URL}/chat/completions` (no tools) → output guard → plain-text reply.
+  - The model is configured only by `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY`: local Ollama by default, or a LAN machine, a DGX, or a hosted server.
+- **Safety:**
+  - Allowlisted fields only: no phone, email, Telegram id, notes, Last Error, driver or vehicle.
+  - The output guard rejects a flight not in the context, and a cab called booked/assigned/dispatched/confirmed.
+  - Deterministic `/help`, `/flight`, `/delayed`, `/cabs` and `/status`, plus fallbacks when the model fails.
+  - Rate limit 6/min per chat, 500-character questions, redaction of the bot token, model key, OAuth secret and Google tokens.
+  - No conversation storage, and never exits on runtime errors.
+  - Source-level test: no write call exists (no webhook methods, no Sheets write endpoints, no write scope).
+- **Shared-file edits:**
+  - `package.json`: scripts `assistant`, `assistant:auth`, `assistant:health`, `test:assistant`; the suite added to `test`.
+  - `tools/doctor.js`: expected files, the suite, ignore checks for `.env.local-assistant` and `.state/`, `.state` skipped by the secrets scan, `*.example` files allowed as tracked.
+  - `test/setup-tests.js`: the doctor's ignore counts are now 13/11.
+  - `.gitignore`: `!.env.local-assistant.example`, `local-assistant/.state/`.
+  - `src/Alerts.js`: the 409 text of "Show Telegram chat ids" now mentions the assistant.
+  - README pointer and troubleshooting row.
+- **Cross-workstream impact:** only one program may read a bot's updates. While the worker runs, "Show Telegram chat ids" sees nothing new and may get HTTP 409; the worker tells unknown private chats their own chat id instead. A separate bot token for the assistant avoids this entirely. The worker reads only the documented header names (`COLS` headers, Groups' first 7 headers, Config keys `HOME_AIRPORT` and `OPENSKY_STALE_MIN`): **renaming any of them breaks it**, so update `local-assistant/src/snapshot.js` with any rename.
+- **Results:** 24 tests in `local-assistant/test/assistant-tests.js`. Mutation checks on a scratch copy confirmed the tests fail when the allowlist, offset saving, duplicate skipping, stale-position rule, cab guard, invented-flight guard, field allowlist or malformed-output check is broken.
+- **Needs real verification:** Telegram long-polling and replies with a real bot; the OAuth consent flow and Sheets reads with real credentials (`FORMATTED_STRING` dates, the "Unable to parse range" wording for a missing tab); answer quality and rule-following of the chosen model; DGX reachability, TLS and API-key auth; behaviour when the worker and "Show Telegram chat ids" overlap.
 
 **Telegram Bot Setup** (2026-10-20, verified locally with faked Telegram answers):
 - **Defects found in the audit** (code as it was before this workstream):

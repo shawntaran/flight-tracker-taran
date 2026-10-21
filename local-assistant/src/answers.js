@@ -40,6 +40,15 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 const TITLES = new Set(['dr', 'prof', 'professor', 'mr', 'mrs', 'ms', 'miss', 'sir', 'madam', 'the', 'and']);
+// Words of a question that must never count as a name match (sheet names are untrusted text).
+const QUESTION_WORDS = new Set(['who', 'when', 'where', 'which', 'what', 'how', 'are', 'arriving', 'arrives', 'arrive', 'arrival', 'arrivals',
+  'land', 'lands', 'landing', 'landed', 'delay', 'delayed', 'late', 'cab', 'cabs', 'share', 'sharing', 'flight', 'flights', 'right', 'now',
+  'today', 'tomorrow', 'around', 'could', 'needs', 'need', 'attention', 'status', 'pickup', 'taxi', 'car', 'driver', 'every', 'all',
+  'ignore', 'instructions', 'previous', 'rules', 'print', 'system', 'prompt', 'say', 'tell', 'show', 'list', 'please', 'booked']);
+/** Up to three name words (titles and question words excluded): enough for a name, too few to carry injected text. */
+function nameTokens(name) {
+  return name.toLowerCase().split(/[^a-zÀ-ɏ]+/).filter((t) => t.length >= 3 && !TITLES.has(t) && !QUESTION_WORDS.has(t)).slice(0, 3);
+}
 const FLIGHT_IN_QUESTION = /\b([A-Z]{2,3}|[A-Z]\d|\d[A-Z])[\s-]?0*(\d{1,4})\b/g;
 const NOT_AIRLINES = new Set(['IST', 'UTC', 'GMT', 'ETA', 'ETD', 'KM', 'AM', 'PM', 'NO', 'AT', 'BY', 'TO', 'IN', 'ON', 'OF', 'UP', 'OR']);
 
@@ -50,9 +59,8 @@ function matchFlights(question, snap) {
   let m;
   FLIGHT_IN_QUESTION.lastIndex = 0;
   while ((m = FLIGHT_IN_QUESTION.exec(q.toUpperCase()))) if (!NOT_AIRLINES.has(m[1])) keys.add(m[1] + m[2]);
-  const words = new Set(q.toLowerCase().split(/[^a-zÀ-ɏ]+/).filter((w) => w.length >= 3 && !TITLES.has(w)));
-  return snap.flights.filter((f) => keys.has(f.key) ||
-    f.name.toLowerCase().split(/[^a-zÀ-ɏ]+/).some((t) => t.length >= 3 && !TITLES.has(t) && words.has(t)));
+  const words = new Set(q.toLowerCase().split(/[^a-zÀ-ɏ]+/));
+  return snap.flights.filter((f) => keys.has(f.key) || nameTokens(f.name).some((t) => words.has(t)));
 }
 
 function statusLine(f) {
@@ -175,7 +183,7 @@ const CAB_WORDS = /\b(cab|cabs|taxi|car|driver|pickup|pick-up|ride|vehicle)\b/i;
 
 /** Checks the model's answer against the data it was given. -> {ok, text} | {ok: false, reason}. */
 function guardAnswer(text, ctx) {
-  let t = String(text || '').trim();
+  let t = String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   if (!t) return { ok: false, reason: 'empty answer' };
   if (t.length > 1500) t = t.slice(0, 1500) + '…';
   const known = new Set(ctx.flights.map((f) => normFlight(f.flight)));

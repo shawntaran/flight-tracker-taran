@@ -20,13 +20,18 @@ function createLlm({ baseUrl, model, apiKey, timeoutMs, enabled, fetch, redact }
     }
   }
 
-  /** messages -> {ok: true, text} | {ok: false, error}. Never throws. */
-  async function chat(messages) {
+  /**
+   * messages -> {ok: true, text} | {ok: false, error}. Never throws.
+   * opts.maxTokens (default 600); opts.reasoningEffort, e.g. 'none' to turn off a reasoning model's thinking (Ollama, vLLM).
+   */
+  async function chat(messages, opts) {
     if (!enabled) return { ok: false, error: 'model not configured' };
+    const o = opts || {};
+    const body = { model, messages, temperature: 0, max_tokens: o.maxTokens || 600, stream: false };
+    if (o.reasoningEffort) body.reasoning_effort = o.reasoningEffort;
     let r;
     try {
-      r = await request('/chat/completions', { method: 'POST',
-        body: JSON.stringify({ model, messages, temperature: 0, max_tokens: 600, stream: false }) }, timeoutMs);
+      r = await request('/chat/completions', { method: 'POST', body: JSON.stringify(body) }, timeoutMs);
     } catch (e) {
       return { ok: false, error: safe(e) };
     }
