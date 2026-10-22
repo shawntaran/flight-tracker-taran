@@ -69,4 +69,93 @@ function createLlm({ baseUrl, model, apiKey, timeoutMs, enabled, fetch, redact }
   return { chat, health, host, model, enabled: !!enabled };
 }
 
-module.exports = { createLlm };
+// ---------------------------------------------------------------- Google Gemini (Google AI Studio API key)
+// LLM_PROVIDER=gemini: the same chat()/health() contract through Google's @google/genai SDK. System messages
+// become systemInstruction; assistant turns become role "model". No tools: the model can only return text.
+const GEMINI_HOST = 'https://generativelanguage.googleapis.com';
+const THINKING_HEADROOM = 2048; // thinking models spend output tokens before answering; the prompts keep answers short
+
+/** genai: (apiKey) -> GoogleGenAI-like client; injected by tests, the real SDK otherwise. */
+function createGeminiLlm({ model, apiKey, timeoutMs, enabled, redact, genai }) {
+  const make = genai || ((key) => new (require('@google/genai').GoogleGenAI)({ apiKey: key }));
+  let client = null;
+  const ai = () => (client = client || make(apiKey));
+  const safe = (e) => {
+    const s = String((e && e.message) || e || '');
+    const status = (e && (e.status || e.code)) || (s.match(/"code":\s*(\d{3})/) || s.match(/\b(4\d\d|5\d\d)\b/) || [])[1];
+    const hint = /^(401|403)$/.test(String(status)) || /API key not valid|PERMISSION_DENIED/i.test(s) ? ' (check GEMINI_API_KEY)'
+      : String(status) === '404' || /not found/i.test(s) ? ' (check LLM_MODEL: the model name was not found)'
+        : String(status) === '429' || /RESOURCE_EXHAUSTED|quota/i.test(s) ? ' (free-tier rate limit or quota reached; try again shortly)' : '';
+    return redact((status ? 'HTTP ' + status + hint + ': ' : '') + s).slice(0, 200);
+  };
+  const withTimeout = (p, ms) => {
+    let timer;
+    return Promise.race([p, new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('timed out after ' + ms + ' ms')), ms); })])
+      .finally(() => clearTimeout(timer));
+  };
+
+  /** OpenAI-style messages -> {systemInstruction, contents}. */
+  function toGemini(messages) {
+    const system = [], contents = [];
+    (messages || []).forEach((m) => {
+      const text = String((m && m.content) == null ? '' : m.content);
+      if (m.role === 'system') system.push(text);
+      else contents.push({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text }] });
+    });
+    return { systemInstruction: system.join('\n\n') || undefined, contents };
+  }
+
+  /** Same contract as the OpenAI-compatible client. opts.responseFormat {type: 'json_object'} -> JSON-only answer. */
+  async function chat(messages, opts) {
+    if (!enabled) return { ok: false, error: 'model not configured' };
+    const o = opts || {};
+    const g = toGemini(messages);
+    if (!g.contents.length) return { ok: false, error: 'nothing to send' };
+    const ctl = new AbortController();
+    const config = { temperature: 0, maxOutputTokens: (o.maxTokens || 600) + THINKING_HEADROOM, abortSignal: ctl.signal };
+    if (g.systemInstruction) config.systemInstruction = g.systemInstruction;
+    if (o.responseFormat && o.responseFormat.type === 'json_object') config.responseMimeType = 'application/json';
+    let res;
+    try {
+      res = await withTimeout(ai().models.generateContent({ model, contents: g.contents, config }), timeoutMs);
+    } catch (e) {
+      ctl.abort();
+      return { ok: false, error: safe(e) };
+    }
+    const cand = res && Array.isArray(res.candidates) ? res.candidates[0] : null;
+    const reason = cand && cand.finishReason;
+    let text = '';
+    try { text = String((res && res.text) || ''); } catch (e) { text = ''; }
+    text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    if (text) return { ok: true, text };
+    const blocked = res && res.promptFeedback && res.promptFeedback.blockReason;
+    return { ok: false, error: blocked ? 'blocked by Gemini (' + blocked + ')' : reason ? 'empty answer (finish reason ' + reason + ')' : 'empty answer' };
+  }
+
+  /** {host, model, reachable, modelListed, detail}: asks Gemini for the model by name. Never includes the key. */
+  async function health() {
+    const out = { host: GEMINI_HOST, model: model || '(not set)', reachable: false, modelListed: null, detail: '' };
+    if (!enabled) { out.detail = 'model not configured (set GEMINI_API_KEY and LLM_MODEL)'; return out; }
+    try {
+      const m = await withTimeout(ai().models.get({ model }), Math.min(timeoutMs, 10000));
+      out.reachable = true;
+      out.modelListed = !!m;
+      out.detail = m ? 'model available' + (m.displayName ? ' (' + m.displayName + ')' : '') : 'model not found';
+    } catch (e) {
+      const d = safe(e);
+      out.reachable = !/timed out|fetch failed|ENOTFOUND|ECONNREFUSED/i.test(d);
+      if (/check LLM_MODEL/.test(d)) out.modelListed = false;
+      out.detail = d;
+    }
+    return out;
+  }
+
+  return { chat, health, host: GEMINI_HOST, model, enabled: !!enabled };
+}
+
+/** provider 'gemini' -> Google's SDK; anything else -> the OpenAI-compatible client above. */
+function createModel(opts) {
+  return opts && opts.provider === 'gemini' ? createGeminiLlm(opts) : createLlm(opts);
+}
+
+module.exports = { createLlm, createGeminiLlm, createModel };

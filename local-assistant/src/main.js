@@ -12,7 +12,7 @@ const { createTelegram } = require('./telegram');
 const { createOffsetStore } = require('./state');
 const { createSupabase } = require('./supabase');
 const { createGoogle } = require('./google');
-const { createLlm } = require('./llm');
+const { createModel } = require('./llm');
 const { createWorker, createSnapshotSource } = require('./worker');
 
 let redactAll = makeRedactor([]);
@@ -27,7 +27,7 @@ async function main() {
   problems.forEach((p) => log(p.level === 'error' ? 'ERROR' : 'WARN', p.key + ': ' + p.message));
 
   const supabase = createSupabase({ url: config.supabase.url, anonKey: config.supabase.anonKey, redact });
-  const llm = createLlm(Object.assign({}, config.llm, { fetch, redact }));
+  const llm = createModel(Object.assign({}, config.llm, { fetch, redact }));
 
   if (cmd === 'auth') {
     if (!config.google.clientId || !config.google.clientSecret) { print('Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET first.'); process.exitCode = 1; return; }

@@ -44,7 +44,17 @@ cp local-assistant/.env.local-assistant.example local-assistant/.env.local-assis
 
 ### 4. Language model
 
-Any server with an OpenAI-compatible `POST /v1/chat/completions` works. Only `LLM_BASE_URL`, `LLM_MODEL` and, when needed, `LLM_API_KEY` change between setups.
+**Google AI Studio (Gemini, hosted by Google):** create a key at aistudio.google.com → **Get API key**, then set:
+
+```
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=<the key>
+GEMINI_MODEL=gemini-3.8-flash
+```
+
+The bot, the dashboard's Flight Assistant and the Smart Cab Plan all switch together; they go through Google's `@google/genai` SDK (`local-assistant/src/llm.js`). `npm run assistant:health` looks the model up by name, so a wrong `GEMINI_MODEL` shows up there. On the free tier Google may use what is sent to improve its products: the bot sends names, flight numbers, statuses and times, never phone numbers or emails. Set `LLM_PROVIDER` blank to go back to the endpoint below.
+
+**Your own server instead:** any server with an OpenAI-compatible `POST /v1/chat/completions` works. Only `LLM_BASE_URL`, `LLM_MODEL` and, when needed, `LLM_API_KEY` change between setups.
 
 **On this machine (Ollama):**
 

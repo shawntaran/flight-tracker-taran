@@ -14,7 +14,7 @@ const { createOffsetStore } = require(path.join(SRC, 'state'));
 const { createSupabase, toRows, TABLES } = require(path.join(SRC, 'supabase'));
 const { parseTime } = require(path.join(SRC, 'time'));
 const { createGoogle, SCOPE } = require(path.join(SRC, 'google'));
-const { createLlm } = require(path.join(SRC, 'llm'));
+const { createLlm, createModel } = require(path.join(SRC, 'llm'));
 const { buildSnapshot } = require(path.join(SRC, 'snapshot'));
 const A = require(path.join(SRC, 'answers'));
 const { createWorker, createSnapshotSource } = require(path.join(SRC, 'worker'));
@@ -450,6 +450,81 @@ test('Google: read-only scope, GET-only Sheets reads, token refresh, missing tab
   assert.strictEqual(JSON.parse(fs.readFileSync(tokenFile, 'utf8')).access_token, 'ya29.new');
   fs.writeFileSync(tokenFile, JSON.stringify({ refresh_token: 'r', scope: 'https://www.googleapis.com/auth/spreadsheets' }));
   await assert.rejects(g.readRange('sheet123', 'Flights'), /not read-only/);
+});
+// ---------------------------------------------------------------- Gemini (LLM_PROVIDER=gemini)
+const FAKE_GEMINI = 'AIza' + 'FakeGeminiKeyForTestsOnly_0123456789';
+function fakeGenai(reply) {
+  const calls = { generate: [], get: [], keys: [] };
+  const genai = (key) => {
+    calls.keys.push(key);
+    return { models: {
+      generateContent: async (req) => { calls.generate.push(req); return typeof reply === 'function' ? reply(req) : reply; },
+      get: async (req) => { calls.get.push(req); if (req.model === 'missing-model') throw Object.assign(new Error('models/missing-model is not found'), { status: 404 }); return { name: 'models/' + req.model, displayName: 'Gemini Flash' }; }
+    } };
+  };
+  return { genai, calls };
+}
+const geminiLlm = (genai, over) => createModel(Object.assign({ provider: 'gemini', model: 'gemini-3.8-flash', apiKey: FAKE_GEMINI, timeoutMs: 1000,
+  enabled: true, redact: makeRedactor([FAKE_GEMINI]), genai }, over || {}));
+test('Gemini: LLM_PROVIDER=gemini picks the Gemini client; the Ollama lines stay for switching back', () => {
+  const g = buildConfig(Object.assign({}, BASE, { LLM_PROVIDER: 'gemini', GEMINI_API_KEY: FAKE_GEMINI, LLM_MODEL: 'gemma4:latest' })).config.llm;
+  assert.deepStrictEqual([g.provider, g.model, g.apiKey, g.enabled], ['gemini', 'gemini-3.8-flash', FAKE_GEMINI, true]);
+  assert.strictEqual(buildConfig(Object.assign({}, BASE, { LLM_PROVIDER: 'gemini', GEMINI_API_KEY: FAKE_GEMINI, GEMINI_MODEL: 'gemini-x' })).config.llm.model, 'gemini-x');
+  const off = buildConfig(Object.assign({}, BASE, { LLM_PROVIDER: 'gemini' }));
+  assert.ok(!off.config.llm.enabled && off.problems.some((p) => p.key === 'GEMINI_API_KEY' && p.level === 'warn'));
+  assert.strictEqual(buildConfig(Object.assign({}, BASE, { LLM_MODEL: 'gemma4:latest' })).config.llm.provider, 'openai');
+  assert.strictEqual(describe(buildConfig(Object.assign({}, BASE, { LLM_PROVIDER: 'gemini', GEMINI_API_KEY: FAKE_GEMINI })).config).apiKey, 'set');
+});
+test('Gemini: system prompt -> systemInstruction, assistant -> model, temperature 0, JSON mode for the cab plan', async () => {
+  const f = fakeGenai({ text: 'EK568 is delayed by 35 min.', candidates: [{ finishReason: 'STOP' }] });
+  const llm = geminiLlm(f.genai);
+  const r = await llm.chat([{ role: 'system', content: 'RULES' }, { role: 'user', content: 'q1' }, { role: 'assistant', content: 'a1' }, { role: 'user', content: 'q2' }], { maxTokens: 800 });
+  assert.deepStrictEqual(r, { ok: true, text: 'EK568 is delayed by 35 min.' });
+  const req = f.calls.generate[0];
+  assert.strictEqual(req.model, 'gemini-3.8-flash');
+  assert.deepStrictEqual(req.contents, [{ role: 'user', parts: [{ text: 'q1' }] }, { role: 'model', parts: [{ text: 'a1' }] }, { role: 'user', parts: [{ text: 'q2' }] }]);
+  assert.deepStrictEqual([req.config.systemInstruction, req.config.temperature, req.config.responseMimeType], ['RULES', 0, undefined]);
+  assert.ok(req.config.maxOutputTokens >= 800, 'room for the answer after thinking tokens');
+  await llm.chat([{ role: 'user', content: 'plan' }], { responseFormat: { type: 'json_object' } });
+  assert.strictEqual(f.calls.generate[1].config.responseMimeType, 'application/json');
+  assert.deepStrictEqual(f.calls.keys, [FAKE_GEMINI], 'one client, created once');
+});
+test('Gemini failures become {ok:false} with a usable hint and never the key; the caller falls back', async () => {
+  const fail = (err) => geminiLlm(fakeGenai(() => { throw err; }).genai).chat([{ role: 'user', content: 'q' }]);
+  const r401 = await fail(Object.assign(new Error('API key not valid: ' + FAKE_GEMINI), { status: 400 }));
+  assert.ok(!r401.ok && /check GEMINI_API_KEY/.test(r401.error) && !r401.error.includes(FAKE_GEMINI), r401.error);
+  assert.ok(/check LLM_MODEL/.test((await fail(Object.assign(new Error('models/gemini-9 is not found'), { status: 404 }))).error));
+  assert.ok(/rate limit or quota/.test((await fail(Object.assign(new Error('RESOURCE_EXHAUSTED'), { status: 429 }))).error));
+  const slow = await geminiLlm(fakeGenai(() => new Promise(() => {})).genai, { timeoutMs: 30 }).chat([{ role: 'user', content: 'q' }]);
+  assert.ok(!slow.ok && /timed out after 30 ms/.test(slow.error));
+  const empty = await geminiLlm(fakeGenai({ text: '', candidates: [{ finishReason: 'MAX_TOKENS' }] }).genai).chat([{ role: 'user', content: 'q' }]);
+  assert.deepStrictEqual(empty, { ok: false, error: 'empty answer (finish reason MAX_TOKENS)' });
+  const blocked = await geminiLlm(fakeGenai({ promptFeedback: { blockReason: 'SAFETY' } }).genai).chat([{ role: 'user', content: 'q' }]);
+  assert.deepStrictEqual(blocked, { ok: false, error: 'blocked by Gemini (SAFETY)' });
+  const r = await A.answer('where is EK568?', deps(geminiLlm(fakeGenai(() => { throw new Error('boom'); }).genai)));
+  assert.ok(/EK568/.test(r.text), 'flight questions still get the deterministic answer');
+});
+test('Gemini health: the model is looked up by name; a wrong name says so', async () => {
+  const ok = await geminiLlm(fakeGenai({}).genai).health();
+  assert.deepStrictEqual([ok.reachable, ok.modelListed, ok.detail], [true, true, 'model available (Gemini Flash)']);
+  const bad = await geminiLlm(fakeGenai({}).genai, { model: 'missing-model' }).health();
+  assert.ok(bad.reachable && bad.modelListed === false && /check LLM_MODEL/.test(bad.detail), JSON.stringify(bad));
+  assert.ok(!JSON.stringify(ok).includes(FAKE_GEMINI));
+});
+test('the dashboard assistant and Smart Cab Plan use Gemini too (no Ollama probing)', async () => {
+  const f = fakeGenai({ text: '{"groups":[]}' });
+  const dir = tmpDir(), env = path.join(dir, '.env');
+  fs.writeFileSync(env, 'LLM_PROVIDER=gemini\nGEMINI_API_KEY=' + FAKE_GEMINI + '\n');
+  const fetched = [];
+  const ops = require(path.join(__dirname, '..', '..', 'tools', 'ops-assistant.js')).createOpsAssistant({ envFile: env, genai: f.genai,
+    fetch: async (u) => { fetched.push(u); throw new Error('no network in tests'); } });
+  const s = await ops.status();
+  assert.deepStrictEqual([s.online, s.model], [true, 'gemini-3.8-flash']);
+  const d = await ops.dispatch({ input: { cabs: [{ id: 'A1', guests: ['F1'] }], guests: [{ id: 'F1' }], rules: { window_min: 45, max_seats: 4 } } });
+  assert.deepStrictEqual(d, { ok: true, text: '{"groups":[]}' });
+  assert.deepStrictEqual(fetched, [], 'nothing went to an Ollama URL');
+  assert.deepStrictEqual([f.calls.get.length, f.calls.generate.length], [1, 1]);
+  assert.strictEqual(f.calls.generate[0].config.responseMimeType, 'application/json', 'Smart Cab Plan asks for JSON');
 });
 test('no write operation exists anywhere in the worker source', () => {
   const src = fs.readdirSync(SRC).map((f) => fs.readFileSync(path.join(SRC, f), 'utf8')).join('\n');

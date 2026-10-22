@@ -20,6 +20,7 @@
     "test:assistant": "node local-assistant/test/assistant-tests.js"
   },
   "dependencies": {
+    "@google/genai": "^2.30.0",
     "@supabase/supabase-js": "^2.118.0"
   }
 }

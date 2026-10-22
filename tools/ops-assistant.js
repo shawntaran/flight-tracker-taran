@@ -4,7 +4,7 @@
 // model configured in local-assistant/.env.local-assistant (local Ollama by default) through local-assistant's
 // OpenAI-compatible client. Read-only: the model can only return text.
 
-const { createLlm } = require('../local-assistant/src/llm');
+const { createModel } = require('../local-assistant/src/llm');
 const SmartDispatch = require('./smart-dispatch');
 
 const MAX_TURNS = 12;            // most recent user/assistant messages sent to the model
@@ -114,9 +114,9 @@ function createOpsAssistant(opts) {
     const { loadConfig } = require('../local-assistant/src/config');
     const { makeRedactor } = require('../local-assistant/src/redact');
     const c = loadConfig(o.envFile).config.llm;
-    llm = createLlm({ baseUrl: c.baseUrl, model: c.model, apiKey: c.apiKey, timeoutMs: Math.max(c.timeoutMs, MIN_TIMEOUT_MS),
-      enabled: c.enabled, fetch: o.fetch || fetch, redact: makeRedactor([c.apiKey]) });
-    if (c.enabled && !c.apiKey) ollama = createOllamaChat({ baseUrl: c.baseUrl, model: c.model, timeoutMs: Math.max(c.timeoutMs, MIN_TIMEOUT_MS), fetch: o.fetch || fetch });
+    llm = createModel({ provider: c.provider, baseUrl: c.baseUrl, model: c.model, apiKey: c.apiKey, timeoutMs: Math.max(c.timeoutMs, MIN_TIMEOUT_MS),
+      enabled: c.enabled, fetch: o.fetch || fetch, redact: makeRedactor([c.apiKey]), genai: o.genai });
+    if (c.provider !== 'gemini' && c.enabled && !c.apiKey) ollama = createOllamaChat({ baseUrl: c.baseUrl, model: c.model, timeoutMs: Math.max(c.timeoutMs, MIN_TIMEOUT_MS), fetch: o.fetch || fetch });
   }
 
   async function ask(body) {

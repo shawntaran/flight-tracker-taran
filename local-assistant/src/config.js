@@ -8,9 +8,11 @@ const path = require('path');
 const ENV_FILE = path.join(__dirname, '..', '.env.local-assistant');
 const KEYS = ['TG_BOT_TOKEN', 'ALLOWED_CHAT_IDS', 'SUPABASE_URL', 'SUPABASE_ANON_KEY',
   'GOOGLE_SPREADSHEET_ID', 'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET',
+  'LLM_PROVIDER', 'GEMINI_API_KEY', 'GEMINI_MODEL',
   'LLM_BASE_URL', 'LLM_MODEL', 'LLM_API_KEY', 'LLM_TIMEOUT_MS', 'STATE_DIR', 'RATE_LIMIT_PER_MIN', 'MAX_QUESTION_CHARS',
   'PREVIEW_SOURCE'];
 const PLACEHOLDER_MODEL = 'your-model-name';
+const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 
 /** Pure: KEY=VALUE text -> object. '#' comments, optional quotes, no interpolation. */
 function parseEnv(text) {
@@ -66,28 +68,22 @@ function buildConfig(raw) {
     else problems.push({ level: 'warn', key: 'ALLOWED_CHAT_IDS', message: 'entry "' + id.slice(0, 20) + '" is not a numeric chat id; ignored' });
   });
 
-  let baseUrl = get('LLM_BASE_URL') || 'http://127.0.0.1:11434/v1';
-  let url = null;
-  try {
-    url = new URL(baseUrl);
-    if (!/^https?:$/.test(url.protocol)) throw new Error('protocol');
-    if (url.username || url.password) {
-      problems.push({ level: 'error', key: 'LLM_BASE_URL', message: 'must not contain credentials; put the key in LLM_API_KEY' });
-      url.username = ''; url.password = '';
-    }
-    baseUrl = url.toString().replace(/\/+$/, '');
-  } catch (e) {
-    problems.push({ level: 'error', key: 'LLM_BASE_URL', message: 'not a valid http(s) URL; the language model is disabled' });
-    url = null;
+  // LLM_PROVIDER=gemini: Google AI Studio through @google/genai (GEMINI_API_KEY, GEMINI_MODEL); the LLM_BASE_URL /
+  // LLM_MODEL / LLM_API_KEY lines stay as they are, so switching back is one line.
+  const providerRaw = get('LLM_PROVIDER').toLowerCase();
+  if (providerRaw && providerRaw !== 'gemini' && providerRaw !== 'openai') {
+    problems.push({ level: 'warn', key: 'LLM_PROVIDER', message: 'must be "gemini" or "openai" (any OpenAI-compatible server, e.g. Ollama); using openai' });
   }
-  const model = get('LLM_MODEL');
-  if (!model || model === PLACEHOLDER_MODEL) {
-    problems.push({ level: 'warn', key: 'LLM_MODEL', message: 'not set; only commands and deterministic answers will work' });
+  const timeoutMs = intIn(get('LLM_TIMEOUT_MS'), 30000, 1000, 120000);
+  let llm;
+  if (providerRaw === 'gemini') {
+    llm = { provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com', model: get('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL,
+      apiKey: get('GEMINI_API_KEY'), timeoutMs };
+    if (!llm.apiKey) problems.push({ level: 'warn', key: 'GEMINI_API_KEY', message: 'not set (aistudio.google.com -> Get API key); only commands and deterministic answers will work' });
+    llm.enabled = !!llm.apiKey;
+  } else {
+    llm = openAiCompatible(get, problems, timeoutMs);
   }
-  const llm = { baseUrl, model: model === PLACEHOLDER_MODEL ? '' : model, apiKey: get('LLM_API_KEY'),
-    timeoutMs: intIn(get('LLM_TIMEOUT_MS'), 30000, 1000, 120000) };
-  llm.enabled = !!(url && llm.model);
-  if (url) endpointSafety(url, !!llm.apiKey).forEach((p) => problems.push(p));
 
   // Local preview dashboard only (tools/sheet-source.js): which columns it reads. The bot itself always reads Flights.
   const previewRaw = get('PREVIEW_SOURCE').toLowerCase();
@@ -110,6 +106,32 @@ function buildConfig(raw) {
     pollTimeoutS: 25, snapshotTtlMs: 60 * 1000, maxMessageAgeMin: 30
   };
   return { config, problems };
+}
+
+/** The OpenAI-compatible endpoint (Ollama, vLLM, a DGX, ...): LLM_BASE_URL, LLM_MODEL, LLM_API_KEY. */
+function openAiCompatible(get, problems, timeoutMs) {
+  let baseUrl = get('LLM_BASE_URL') || 'http://127.0.0.1:11434/v1';
+  let url = null;
+  try {
+    url = new URL(baseUrl);
+    if (!/^https?:$/.test(url.protocol)) throw new Error('protocol');
+    if (url.username || url.password) {
+      problems.push({ level: 'error', key: 'LLM_BASE_URL', message: 'must not contain credentials; put the key in LLM_API_KEY' });
+      url.username = ''; url.password = '';
+    }
+    baseUrl = url.toString().replace(/\/+$/, '');
+  } catch (e) {
+    problems.push({ level: 'error', key: 'LLM_BASE_URL', message: 'not a valid http(s) URL; the language model is disabled' });
+    url = null;
+  }
+  const model = get('LLM_MODEL');
+  if (!model || model === PLACEHOLDER_MODEL) {
+    problems.push({ level: 'warn', key: 'LLM_MODEL', message: 'not set; only commands and deterministic answers will work' });
+  }
+  const llm = { provider: 'openai', baseUrl, model: model === PLACEHOLDER_MODEL ? '' : model, apiKey: get('LLM_API_KEY'), timeoutMs };
+  llm.enabled = !!(url && llm.model);
+  if (url) endpointSafety(url, !!llm.apiKey).forEach((p) => problems.push(p));
+  return llm;
 }
 
 /** sb_secret_... keys, or a legacy JWT whose role is service_role. */
@@ -146,7 +168,7 @@ const hostOf = (u) => { try { return new URL(u).host; } catch (e) { return '(inv
 function describe(config) {
   let host = '(invalid URL)';
   try { const u = new URL(config.llm.baseUrl); host = u.protocol + '//' + u.host; } catch (e) { /* invalid */ }
-  return { modelEndpoint: host, model: config.llm.model || '(not set)', apiKey: config.llm.apiKey ? 'set' : 'not set',
+  return { modelProvider: config.llm.provider || 'openai', modelEndpoint: host, model: config.llm.model || '(not set)', apiKey: config.llm.apiKey ? 'set' : 'not set',
     allowedChats: config.allowedChatIds.size, supabase: config.supabase.url ? hostOf(config.supabase.url) : 'not set',
     supabaseKey: config.supabase.anonKey ? 'set' : 'not set', googleOAuth: config.google.clientId ? 'set (optional)' : 'not set (optional)',
     telegramToken: config.tgToken ? 'set' : 'not set', stateDir: config.stateDir };
