@@ -73,7 +73,8 @@ function readJsonPost(req, res, limit, cb) {
   if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
   if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON only' });
   const origin = req.headers.origin;
-  if (origin && origin !== 'http://' + req.headers.host) return sendJson(res, 403, { error: 'cross-origin request refused' });
+  // http locally; https behind the HTTPS proxy on a server (deploy/), which forwards the original Host.
+  if (origin && origin !== 'http://' + req.headers.host && origin !== 'https://' + req.headers.host) return sendJson(res, 403, { error: 'cross-origin request refused' });
   let body = '', tooBig = false;
   req.setEncoding('utf8');
   req.on('data', (chunk) => { if (tooBig) return; body += chunk; if (body.length > limit) { tooBig = true; sendJson(res, 413, { error: 'request too large' }); } });

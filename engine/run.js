@@ -5,6 +5,7 @@
 // state, and the heartbeat in the status table. Used by api/cron.js (Vercel) and from the command line:
 //   node engine/run.js                 one real run (needs SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ADB_KEY, ...)
 //   node engine/run.js --dry-run       reads and calls the APIs, writes NOTHING to Supabase; prints what it would write
+//   node engine/run.js --scheduled     a run started by a scheduler (the VM's cron): the heartbeat reports the trigger installed
 //   node engine/run.js --usage         prints the AeroDataBox usage the engine has counted
 //   node engine/run.js --set-usage <units> <requests> [--allow-lower]
 //                                      copies the RapidAPI dashboard figures in (do this once when moving off Apps Script)
@@ -109,7 +110,7 @@ async function main(argv) {
     if (!Number.isInteger(units) || !Number.isInteger(requests)) throw new Error('usage: --set-usage <units> <requests> [--allow-lower]');
     usageArgs = [units, requests, has('--allow-lower')];
   }
-  const r = await runTracker({ client, secrets: e.secrets, extraRedact: [e.serviceKey], dryRun: has('--dry-run'), action, usageArgs });
+  const r = await runTracker({ client, secrets: e.secrets, extraRedact: [e.serviceKey], dryRun: has('--dry-run'), scheduled: has('--scheduled'), action, usageArgs });
   const shown = Object.assign({}, r);
   delete shown.log;
   console.log(JSON.stringify(shown, null, 2));

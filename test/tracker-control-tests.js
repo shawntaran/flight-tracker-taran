@@ -132,6 +132,8 @@ test('POST endpoints accept JSON from this page only; GET /api/tracker/run repor
     assert.strictEqual((await request(port, 'POST', '/api/guests', { 'Content-Type': 'application/json', Origin: 'https://evil.example' }, '{}')).code, 403);
     assert.strictEqual((await request(port, 'GET', '/api/guests')).code, 405);
     assert.strictEqual((await request(port, 'POST', '/api/tracker/run', { 'Content-Type': 'application/json', Origin: 'https://evil.example' }, '{}')).code, 403);
+    const viaProxy = await request(port, 'POST', '/api/guests', { 'Content-Type': 'application/json', Origin: 'https://localhost:' + port }, '{"name":""}');
+    assert.notStrictEqual(viaProxy.code, 403, 'the same host over https (behind the HTTPS proxy) is accepted');
     const s = await request(port, 'GET', '/api/tracker/run');
     assert.deepStrictEqual([s.code, s.body.running, s.body.startedAt], [200, false, null]);
   } finally { server.close(); }

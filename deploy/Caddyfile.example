@@ -1,0 +1,12 @@
+# Caddy: HTTPS (automatic Let's Encrypt certificate) and a password in front of the dashboard.
+# Copy to /etc/caddy/Caddyfile and replace the two placeholders (deploy/README.md, step 6):
+#   YOUR_HOSTNAME   e.g. 34-123-45-67.sslip.io (the VM's IP with dashes; free, no domain needed) or your own domain
+#   PASSWORD_HASH   the output of:  caddy hash-password
+# The dashboard itself listens on localhost:3000 only, so this is the only way in.
+
+YOUR_HOSTNAME {
+	basic_auth {
+		coordinator PASSWORD_HASH
+	}
+	reverse_proxy localhost:3000
+}
