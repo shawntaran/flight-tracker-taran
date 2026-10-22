@@ -11,6 +11,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
 <style>
+  #guest-dialog::backdrop { background: rgb(0 0 0 / 0.45); }
   :root {
     --background: 250 248 255; --surface-container-lowest: 255 255 255; --surface-container-low: 242 243 255;
     --surface-container: 234 237 255; --surface-container-high: 226 231 255;
@@ -175,6 +176,12 @@
       <div class="flex items-center gap-1.5"><span id="engine-dot" class="w-2 h-2 rounded-full bg-outline"></span><span id="engine-label" class="font-label-sm text-label-sm text-on-surface font-medium">Engine status…</span></div>
       <span class="font-data-mono text-on-surface-variant/80 text-[10px]">5m tick</span>
     </div>
+    <div class="px-space-xs pb-1.5 pt-0.5">
+      <button id="run-tracker-btn" type="button" class="w-full h-8 rounded-lg bg-primary text-on-primary hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity font-label-md text-label-md font-semibold flex items-center justify-center gap-1.5" title="Run the tracking engine once now, without waiting for the 5-minute schedule">
+        <span id="run-tracker-icon" class="material-symbols-outlined text-[16px]">play_arrow</span><span id="run-tracker-label">Run Tracker Now</span>
+      </button>
+      <p id="run-tracker-status" class="mt-1 font-body-sm text-[11px] leading-snug text-on-surface-variant empty:hidden" aria-live="polite"></p>
+    </div>
     <div class="flex items-center justify-between px-space-xs pt-1 border-t border-outline-variant/10">
       <span class="font-label-sm text-label-sm text-on-surface-variant">Zone</span>
       <span class="font-data-mono text-data-mono text-on-surface-variant font-medium">Asia/Kolkata (IST)</span>
@@ -207,6 +214,7 @@
       </div>
       <div class="flex items-center gap-space-xs text-on-surface-variant">
         <span id="synced-ago" class="font-data-mono text-data-mono hidden xl:inline">Loading…</span>
+        <button id="add-guest-btn" type="button" class="h-8 px-2.5 rounded-lg bg-primary text-on-primary hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity font-label-md text-label-md font-semibold flex items-center gap-1" title="Add a guest to the Flights table"><span class="material-symbols-outlined text-[18px]">person_add</span><span class="hidden sm:inline">Add guest</span></button>
         <button data-refresh class="p-1.5 rounded hover:bg-surface-container-high hover:text-on-surface transition-colors" title="Refresh data" type="button"><span class="material-symbols-outlined text-[18px]">refresh</span></button>
         <button id="theme-toggle-btn" class="p-1.5 rounded hover:bg-surface-container-high hover:text-on-surface transition-colors flex items-center justify-center" title="Toggle theme" aria-label="Toggle dark mode" type="button"><span id="theme-icon" class="material-symbols-outlined text-[18px]">dark_mode</span></button>
       </div>
@@ -225,6 +233,7 @@
   <main class="relative mt-16 bg-background flex-1 w-full px-gutter py-space-md">
     <div id="banner" class="hidden mb-space-md p-3 rounded-lg bg-error-container text-on-error-container font-body-sm text-body-sm"></div>
     <div id="hb-banner" role="alert" class="hidden mb-space-md p-3 rounded-lg bg-error-container text-on-error-container font-body-sm text-body-sm"></div>
+    <div id="notice" role="status" class="hidden mb-space-md p-3 rounded-lg bg-secondary-fixed text-on-secondary-fixed font-body-sm text-body-sm"></div>
 
     <!-- ==================== PAGE: OVERVIEW ==================== -->
     <div id="page-overview" class="flex flex-col w-full">
@@ -700,6 +709,42 @@
     </div>
 
     <!-- ===== ASSISTANT: answers come from the local model (tools/ops-assistant.js) with this page's flight data ===== -->
+    <dialog id="guest-dialog" aria-labelledby="guest-title" class="w-[min(28rem,calc(100vw-2rem))] p-0 rounded-xl border border-outline-variant/40 bg-surface-container-lowest text-on-surface shadow-xl">
+      <form id="guest-form" method="dialog" novalidate class="p-space-lg flex flex-col gap-space-md">
+        <div class="flex items-start justify-between gap-space-sm">
+          <div>
+            <h2 id="guest-title" class="font-headline-sm text-headline-sm text-primary">Add guest</h2>
+            <p class="font-body-sm text-body-sm text-on-surface-variant">Saved to the Supabase Flights table. The tracker starts checking it on its next run.</p>
+          </div>
+          <button type="button" data-guest-close class="p-1 rounded hover:bg-surface-container-high text-on-surface-variant" aria-label="Close"><span class="material-symbols-outlined text-[20px]">close</span></button>
+        </div>
+        <label class="flex flex-col gap-1 font-label-md text-label-md">Guest name
+          <input name="name" required maxlength="80" autocomplete="off" class="h-10 px-3 rounded-lg bg-surface-container-low border border-outline-variant/50 font-body-md text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40" placeholder="Dr Asha Sharma">
+        </label>
+        <div class="grid grid-cols-2 gap-space-sm">
+          <label class="flex flex-col gap-1 font-label-md text-label-md">Flight number
+            <input name="flight" required maxlength="10" autocomplete="off" class="h-10 px-3 rounded-lg bg-surface-container-low border border-outline-variant/50 font-data-mono text-data-mono uppercase text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40" placeholder="EK 568">
+          </label>
+          <label class="flex flex-col gap-1 font-label-md text-label-md">Direction
+            <select name="direction" class="h-10 px-2 rounded-lg bg-surface-container-low border border-outline-variant/50 font-body-md text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40">
+              <option value="Arrival">Arrival</option><option value="Departure">Departure</option>
+            </select>
+          </label>
+          <label class="flex flex-col gap-1 font-label-md text-label-md">Date
+            <input name="date" type="date" required class="h-10 px-3 rounded-lg bg-surface-container-low border border-outline-variant/50 font-body-md text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40">
+          </label>
+          <label class="flex flex-col gap-1 font-label-md text-label-md"><span id="guest-time-label">Scheduled arrival (IST)</span>
+            <input name="time" type="time" required class="h-10 px-3 rounded-lg bg-surface-container-low border border-outline-variant/50 font-body-md text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40">
+          </label>
+        </div>
+        <p id="guest-error" role="alert" class="font-body-sm text-body-sm text-error empty:hidden"></p>
+        <div class="flex justify-end gap-space-sm">
+          <button type="button" data-guest-close class="h-9 px-3.5 rounded-lg bg-surface-container-low text-on-surface hover:bg-surface-container font-label-md text-label-md">Cancel</button>
+          <button id="guest-save" type="submit" class="h-9 px-3.5 rounded-lg bg-primary text-on-primary hover:opacity-90 disabled:opacity-50 font-label-md text-label-md font-semibold">Add guest</button>
+        </div>
+      </form>
+    </dialog>
+
     <div class="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
       <div id="flight-assistant-card" class="hidden w-[360px] max-w-[calc(100vw-2rem)] bg-surface-container-lowest border border-outline-variant/30 rounded-xl shadow-xl overflow-hidden flex-col">
         <div class="bg-surface-container-low/70 px-4 py-3 border-b border-outline-variant/20 flex items-center justify-between">
@@ -826,7 +871,7 @@
 
   // ===== DATA =====
   /** fresh: a Refresh click asks the server to skip its 60 s cache; the 5-minute auto-refresh does not. */
-  function load(fresh) {
+  function load(fresh, after) {
     if (!(window.google && google.script && google.script.run)) {
       return showBanner('This page needs the mock bridge. Make sure mock-bridge.js is loaded.');
     }
@@ -839,6 +884,7 @@
       renderGlobal();
       renderPage(state.page);
       tickAgo();
+      if (typeof after === 'function') after(d);
     }).withFailureHandler(function (e) {
       showBanner('Could not load dashboard data: ' + (e && e.message || e));
       $('synced-ago').textContent = 'Sync failed';
@@ -2359,6 +2405,94 @@
       location.hash = page;
     });
   });
+
+  // ===== WRITE ACTIONS: Add guest, Run Tracker Now (server side: tools/tracker-control.js) =====
+  var liveData = function () { return state.data && !state.data.preview; };
+  function showNotice(text) { $('notice').textContent = text; $('notice').classList.toggle('hidden', !text); }
+  function postJson(url, body) {
+    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}), cache: 'no-store' })
+      .then(function (r) { return r.json().catch(function () { return { ok: false, error: 'HTTP ' + r.status }; }); });
+  }
+  var istToday = function () { return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date()); };
+
+  function openGuestDialog() {
+    if (!liveData()) return showNotice('Adding guests needs live Supabase data (this page is showing mock data).');
+    var f = $('guest-form');
+    f.reset();
+    f.elements.date.value = istToday();
+    $('guest-error').textContent = '';
+    $('guest-time-label').textContent = 'Scheduled arrival (IST)';
+    $('guest-dialog').showModal();
+    f.elements.name.focus();
+  }
+  $('add-guest-btn').addEventListener('click', openGuestDialog);
+  $$('[data-guest-close]').forEach(function (b) { b.addEventListener('click', function () { $('guest-dialog').close(); }); });
+  $('guest-form').elements.direction.addEventListener('change', function (e) {
+    $('guest-time-label').textContent = e.target.value === 'Departure' ? 'Scheduled departure (IST)' : 'Scheduled arrival (IST)';
+  });
+  $('guest-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var f = e.target, v = { name: f.elements.name.value, flight: f.elements.flight.value, direction: f.elements.direction.value,
+      date: f.elements.date.value, time: f.elements.time.value };
+    var missing = ['name', 'flight', 'date', 'time'].filter(function (k) { return !String(v[k]).trim(); });
+    if (missing.length) { $('guest-error').textContent = 'Fill in every field.'; f.elements[missing[0]].focus(); return; }
+    $('guest-save').disabled = true; $('guest-save').textContent = 'Saving…'; $('guest-error').textContent = '';
+    postJson('/api/guests', v).then(function (r) {
+      if (!r.ok) { $('guest-error').textContent = r.error || 'Could not add the guest.'; return; }
+      $('guest-dialog').close();
+      showNotice('Added ' + r.row.Name + ' (' + r.row.Flight + ', ' + r.id + '). The tracker checks the flight on its next run.');
+      load(true);
+    }).catch(function (err) {
+      $('guest-error').textContent = 'Could not reach the preview server: ' + (err && err.message || err);
+    }).then(function () { $('guest-save').disabled = false; $('guest-save').textContent = 'Add guest'; });
+  });
+
+  var RUN_POLL_MS = 3000, HEARTBEAT_TRIES = 4;
+  function runUi(busy, text) {
+    $('run-tracker-btn').disabled = busy;
+    $('run-tracker-btn').setAttribute('aria-busy', busy ? 'true' : 'false');
+    $('run-tracker-icon').textContent = busy ? 'progress_activity' : 'play_arrow';
+    $('run-tracker-icon').classList.toggle('animate-spin', busy);
+    $('run-tracker-label').textContent = busy ? 'Tracker running…' : 'Run Tracker Now';
+    if (text != null) $('run-tracker-status').textContent = text;
+  }
+  /** After the run: reload until the status table shows a heartbeat from this run (LAST_TICK_AT >= its start). */
+  function awaitHeartbeat(s, tries) {
+    load(true, function (d) {
+      var at = d.lastTick && d.lastTick.at;
+      if (at && at >= s.startedAt - 2000) {
+        var sm = s.summary || {};
+        runUi(false, d.lastTick.result === 'error' ? 'Run finished with an error: ' + (d.lastTick.error || 'see the heartbeat') + '.'
+          : sm.locked ? 'A scheduled run was already in progress; showing its result.'
+          : 'Done at ' + hm(at) + ' IST: ' + (sm.lookupsMade || 0) + ' lookup(s), ' + (sm.rowsUpdated || 0) + ' status or ETA change(s).');
+      } else if (tries > 1) {
+        setTimeout(function () { awaitHeartbeat(s, tries - 1); }, RUN_POLL_MS);
+      } else {
+        runUi(false, 'The run finished, but the status table has not recorded it yet. Refresh in a moment.');
+      }
+    });
+  }
+  function pollRun() {
+    fetch('/api/tracker/run', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (s) {
+      if (s.running) { setTimeout(pollRun, RUN_POLL_MS); return; }
+      if (!s.startedAt) return runUi(false);
+      if (s.ok === false) return runUi(false, 'The tracker run failed: ' + (s.error || 'unknown error'));
+      awaitHeartbeat(s, HEARTBEAT_TRIES);
+    }).catch(function () { setTimeout(pollRun, RUN_POLL_MS * 2); });
+  }
+  $('run-tracker-btn').addEventListener('click', function () {
+    if (!liveData()) return runUi(false, 'Needs live Supabase data (this page is showing mock data).');
+    runUi(true, 'Checking flights now. This can take up to a minute.');
+    postJson('/api/tracker/run').then(function (s) {
+      if (!s.running && s.ok === false) return runUi(false, 'The tracker run failed: ' + (s.error || 'unknown error'));
+      if (s.started === false && s.running) $('run-tracker-status').textContent = 'A run started earlier is still going; waiting for it.';
+      setTimeout(pollRun, RUN_POLL_MS);
+    }).catch(function (err) { runUi(false, 'Could not reach the preview server: ' + (err && err.message || err)); });
+  });
+  // A run started before this page loaded (another tab, a reload): show it and wait for it.
+  fetch('/api/tracker/run', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (s) {
+    if (s && s.running) { runUi(true, 'A tracker run is in progress.'); setTimeout(pollRun, RUN_POLL_MS); }
+  }).catch(function () {});
 
   // ===== TICKER =====
   function tickAgo() {

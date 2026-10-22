@@ -149,14 +149,17 @@ function createSheetSource(opts) {
     return payload(t, conf, SOURCE_FLIGHTS, m.flights, gr.rows ? mapGroupsRows(gr.rows, m.flights) : [], errors, lastTick);
   }
 
-  return async function getDashboardData(req) {
+  async function getDashboardData(req) {
     const t = now(), fresh = !!(req && req.fresh);
     if (cache && (fresh ? t - lastRead < FRESH_MIN_MS : t - cache.at < CACHE_MS)) return cache.data;
     lastRead = t;
     const data = await build(t);
     cache = { at: t, data };
     return data;
-  };
+  }
+  /** After a write (a guest added, a tracker run): the next read goes to Supabase, whatever the rate limit. */
+  getDashboardData.invalidate = () => { cache = null; lastRead = -Infinity; };
+  return getDashboardData;
 }
 
 module.exports = { createSheetSource, mapFlightsRows, mapGroupsRows, readStatusRows, readConfig,

@@ -49,6 +49,42 @@ function getOpsAssistant() {
   return opsAssistant;
 }
 
+// Write actions (tools/tracker-control.js): add a guest with the anon key; start a tracking-engine run now.
+let guestInserter = null, trackerRunner = null;
+function getGuestInserter() {
+  if (!guestInserter) {
+    const { loadConfig } = require('../local-assistant/src/config');
+    const { createClient } = require('@supabase/supabase-js');
+    const { config } = loadConfig();
+    if (!config.supabase.url || !config.supabase.anonKey) throw new Error('SUPABASE_URL and SUPABASE_ANON_KEY must be set in local-assistant/.env.local-assistant');
+    const client = createClient(config.supabase.url, config.supabase.anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+    guestInserter = require('./tracker-control').createGuestInserter(client);
+  }
+  return guestInserter;
+}
+function getTrackerRunner() {
+  trackerRunner = trackerRunner || require('./tracker-control').createTrackerRunner(require('child_process').spawn);
+  return trackerRunner;
+}
+function invalidateSheetData() { if (sheetSource && sheetSource.invalidate) sheetSource.invalidate(); }
+
+/** POST with a JSON body from this page only (a cross-site page cannot send application/json without a preflight we never answer). */
+function readJsonPost(req, res, limit, cb) {
+  if (req.method !== 'POST') return sendJson(res, 405, { error: 'POST only' });
+  if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'JSON only' });
+  const origin = req.headers.origin;
+  if (origin && origin !== 'http://' + req.headers.host) return sendJson(res, 403, { error: 'cross-origin request refused' });
+  let body = '', tooBig = false;
+  req.setEncoding('utf8');
+  req.on('data', (chunk) => { if (tooBig) return; body += chunk; if (body.length > limit) { tooBig = true; sendJson(res, 413, { error: 'request too large' }); } });
+  req.on('end', () => {
+    if (tooBig) return;
+    let parsed;
+    try { parsed = body ? JSON.parse(body) : {}; } catch (e) { return sendJson(res, 400, { error: 'invalid JSON' }); }
+    cb(parsed);
+  });
+}
+
 function sendJson(res, status, obj) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(obj));
@@ -162,6 +198,26 @@ function handleRequest(req, res) {
       res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify({ error: String(err && err.message || err) }));
     });
+    return;
+  }
+
+  if (pathname === '/api/guests') {
+    readJsonPost(req, res, 4096, (body) => {
+      Promise.resolve().then(() => getGuestInserter()(body)).then((r) => {
+        if (r.ok) invalidateSheetData();
+        sendJson(res, r.ok ? 201 : 400, r);
+      }).catch((err) => sendJson(res, 500, { ok: false, error: String(err && err.message || err) }));
+    });
+    return;
+  }
+
+  if (pathname === '/api/tracker/run') {
+    if (req.method === 'GET') {
+      const s = getTrackerRunner().status();
+      if (!s.running && s.finishedAt) invalidateSheetData();
+      return sendJson(res, 200, s);
+    }
+    readJsonPost(req, res, 1024, () => sendJson(res, 202, getTrackerRunner().start()));
     return;
   }
 

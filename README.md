@@ -196,7 +196,10 @@ Green columns are yours. Blue columns are written by the script. Hidden `m:` col
 - **Same data as the Telegram assistant.** By default (`PREVIEW_SOURCE=flights` in `local-assistant/.env.local-assistant`) it reads the Supabase `flights` table (plus `groups`, `config` and `status` tables if they exist): live statuses, ETAs, cab groups and the heartbeat. The header shows the source: "Data: Supabase · flights table (tracked) · Tracker last ran …".
 - **Import fallback.** If the `flights` table is empty or holds the Import tab's columns rather than the tracker's, the preview shows those schedules instead and says so in a banner: "flights table empty or without the tracker's columns: showing Import-column schedules only, no live status". `PREVIEW_SOURCE=import` always reads the Import columns (schedules only, every status SCHEDULED).
 - **Refresh.** The page refreshes itself every 5 minutes from a 1-minute server cache. The refresh buttons read the sheet again at once (at most once every 5 seconds).
-- **Read-only.** The preview can't force a check or change anything: its **Force check** button is disabled. Use the sheet menu or the deployed dashboard.
+- **Two write actions, both done by the preview server so no key reaches the browser.**
+  - **Add guest** (header) inserts one row into the Supabase `Flights` table with the anon key (it needs an anon INSERT policy). The form asks for name, flight number, direction, date and scheduled time (IST); the tracker can't follow a flight without a time. The row gets the next free `F…` ID, and the list refreshes.
+  - **Run Tracker Now** (sidebar, under the engine status) starts one tracking-engine run (`node engine/run.js`, so it needs `.env.engine` with the service-role key; see [engine/README.md](engine/README.md)). The button stays disabled until the run ends and the `status` table shows its heartbeat; then the data refreshes.
+- The per-flight **Force check** button is still disabled in the preview.
 - `?mock=1` shows built-in sample data without touching the sheet.
 
 ## Telegram alerts: how delivery works
