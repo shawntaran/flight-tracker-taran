@@ -6,11 +6,13 @@
 
 const { createModel } = require('../local-assistant/src/llm');
 const SmartDispatch = require('./smart-dispatch');
+const Fallback = require('./assistant-fallback');
 
 const MAX_TURNS = 12;            // most recent user/assistant messages sent to the model
 const MAX_MESSAGE_CHARS = 2000;
 const MAX_CONTEXT_CHARS = 60000; // JSON of the flight data; bigger payloads are refused, not cut mid-record
-const MIN_TIMEOUT_MS = 120000;   // interactive use: allow for the model being loaded into memory on first use
+const MIN_TIMEOUT_MS = 120000;   // interactive use: allow for the model being loaded into memory on first use (local Ollama)
+const HOSTED_TIMEOUT_MS = 30000; // a hosted model (Gemini) has nothing to load: past this, answer without it
 // No hidden thinking: with it, Gemma 4 can spend the whole token budget reasoning and return an empty answer.
 const CHAT_OPTIONS = { maxTokens: 800, reasoningEffort: 'none' };
 // Smart Cab Plan: a longer JSON answer, constrained to SmartDispatch.RESPONSE_SCHEMA where the server supports it.
@@ -114,24 +116,31 @@ function createOpsAssistant(opts) {
     const { loadConfig } = require('../local-assistant/src/config');
     const { makeRedactor } = require('../local-assistant/src/redact');
     const c = loadConfig(o.envFile).config.llm;
-    llm = createModel({ provider: c.provider, baseUrl: c.baseUrl, model: c.model, apiKey: c.apiKey, timeoutMs: Math.max(c.timeoutMs, MIN_TIMEOUT_MS),
+    llm = createModel({ provider: c.provider, baseUrl: c.baseUrl, model: c.model, apiKey: c.apiKey, timeoutMs: c.provider === 'gemini' ? Math.min(c.timeoutMs, HOSTED_TIMEOUT_MS) : Math.max(c.timeoutMs, MIN_TIMEOUT_MS),
       enabled: c.enabled, fetch: o.fetch || fetch, redact: makeRedactor([c.apiKey]), genai: o.genai });
     if (c.provider !== 'gemini' && c.enabled && !c.apiKey) ollama = createOllamaChat({ baseUrl: c.baseUrl, model: c.model, timeoutMs: Math.max(c.timeoutMs, MIN_TIMEOUT_MS), fetch: o.fetch || fetch });
   }
 
+  // When the model fails, times out or is not set up, the coordinator still gets an answer: from the tracker data
+  // for the chat (tools/assistant-fallback.js), from the rule-based checks for the Smart Cab Plan. fallback: true marks it.
   async function ask(body) {
     const m = buildMessages(body);
     if (!m.ok) return m;
-    return ollama && await ollama.detect() ? ollama.chat(m.messages) : llm.chat(m.messages, CHAT_OPTIONS);
+    const r = ollama && await ollama.detect() ? await ollama.chat(m.messages) : await llm.chat(m.messages, CHAT_OPTIONS);
+    if (r.ok) return r;
+    const turns = body.messages.filter((x) => x && x.role === 'user');
+    return { ok: true, fallback: true, modelError: r.error, text: Fallback.answer(turns[turns.length - 1].content, body.context) };
   }
 
   /** Smart Cab Plan: the model's raw JSON text; the page parses and checks it (tools/smart-dispatch.js). */
   async function dispatch(body) {
     const m = buildDispatchMessages(body);
     if (!m.ok) return m;
-    return ollama && await ollama.detect()
-      ? ollama.chat(m.messages, { maxTokens: DISPATCH_OPTIONS.maxTokens, format: SmartDispatch.RESPONSE_SCHEMA })
-      : llm.chat(m.messages, DISPATCH_OPTIONS);
+    const r = ollama && await ollama.detect()
+      ? await ollama.chat(m.messages, { maxTokens: DISPATCH_OPTIONS.maxTokens, format: SmartDispatch.RESPONSE_SCHEMA })
+      : await llm.chat(m.messages, DISPATCH_OPTIONS);
+    if (r.ok) return r;
+    return { ok: true, fallback: true, modelError: r.error, text: JSON.stringify(SmartDispatch.ruleSuggestions(body.input)) };
   }
 
   async function status() {

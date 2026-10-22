@@ -178,5 +178,26 @@ test('cross-terminal override shows both terminals and leaves a remainder cab', 
   assert.match(m.individual[0].reason, /Left in this cab/);
 });
 
+console.log('smart-dispatch without a model (rule-based fallback)');
+test('near misses become merge suggestions that pass the same checks as the model\'s; a cab is used once', () => {
+  const { ctx } = setup(flights);
+  const res = SD.parse(JSON.stringify(SD.ruleSuggestions(plain(ctx.input))), ctx.index);
+  assert.deepStrictEqual(res.rejected, []);
+  // C (T1) + A (T2) land 2 min apart -> one cross-terminal cab. A's cab is then taken, so A+B is not offered as well.
+  assert.deepStrictEqual(res.suggestions.map((s) => s.action), ['CROSS_TERMINAL']);
+  assert.match(res.suggestions[0].reasoning, /start at T2/);
+  assert.match(res.suggestions[0].reasoning, /Guest A \(XX\d*, [A-Za-z]{3} \d\d:\d\d\).*one cab can take both instead of two/);
+});
+test('a delayed guest who holds cab-mates gets an own pickup; the others leave on time', () => {
+  const { ctx } = setup([arr('A', { schedAt: at(60) }), arr('B', { schedAt: at(50), etaAt: at(80), status: 'DELAYED' })]);
+  const res = SD.parse(JSON.stringify(SD.ruleSuggestions(plain(ctx.input))), ctx.index);
+  assert.deepStrictEqual([res.suggestions.length, res.suggestions[0].action, res.rejected.length], [1, 'LEAVE_BEHIND', 0]);
+  assert.match(res.suggestions[0].reasoning, /delayed by 30 min and now lands 20 min after Guest A/);
+});
+test('nothing worth changing -> no suggestions (the plan stands)', () => {
+  const { ctx } = setup([arr('A', { schedAt: at(60) })]);
+  assert.deepStrictEqual(SD.ruleSuggestions(plain(ctx.input)), { suggestions: [] });
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 if (failed) process.exit(1);

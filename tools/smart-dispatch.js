@@ -230,6 +230,40 @@
     return out;
   }
 
-  return { buildInput: buildInput, buildMessages: buildMessages, parse: parse, extractJson: extractJson,
+  /**
+   * Pure: the review WITHOUT a model, from the hints buildInput() computed: merge near-miss cabs (same terminal, or
+   * cross-terminal within CROSS_TERMINAL_SYNC_MIN) and give a delayed guest who holds cab-mates their own pickup.
+   * Same JSON as the model's answer, so parse() checks it the same way. -> {suggestions: [...]}
+   */
+  function ruleSuggestions(input) {
+    var gs = {}, cabs = {}, used = {}, out = [];
+    (input.guests || []).forEach(function (g) { gs[g.id] = g; });
+    (input.cabs || []).forEach(function (c) { cabs[c.cab] = c; });
+    var who = function (id) { var g = gs[id] || {}; return (g.name || id) + ' (' + (g.flight || '?') + ', ' + (g.arrives || '?') + ')'; };
+    var hints = input.hints || {};
+    (hints.near_merges || []).forEach(function (h) {
+      if (out.length >= MAX_SUGGESTIONS || h.cabs.some(function (c) { return used[c]; })) return;
+      var a = cabs[h.cabs[0]], b = cabs[h.cabs[1]];
+      if (!a || !b) return;
+      var ids = a.guests.concat(b.guests).sort(function (x, y) { return (gs[x].arrives_in_min || 0) - (gs[y].arrives_in_min || 0); });
+      var cross = h.terminals.length > 1, first = gs[ids[0]] || {};
+      out.push({ action: cross ? 'CROSS_TERMINAL' : 'MERGE_CABS', affected_guests: ids, new_groups: [ids],
+        reasoning: (cross ? 'Terminals ' + h.terminals.join(' and ') + ': start at ' + (first.terminal || h.terminals[0]) + '. ' : '') +
+          ids.map(who).join(', ') + ' land within ' + h.spread_min + ' min of each other, so one cab can take ' + (ids.length === 2 ? 'both' : 'all ' + ids.length) +
+          ' instead of two' + (h.over_window_min ? '; the first to land waits up to ' + h.over_window_min + ' min longer than the usual window' : '') + '.' });
+      h.cabs.forEach(function (c) { used[c] = true; });
+    });
+    (hints.delayed_guests || []).forEach(function (d) {
+      if (out.length >= MAX_SUGGESTIONS || used[d.cab]) return;
+      out.push({ action: 'LEAVE_BEHIND', affected_guests: [d.guest], new_groups: [[d.guest]],
+        reasoning: who(d.guest) + ' is delayed' + (d.delay_min ? ' by ' + d.delay_min + ' min' : '') + ' and now lands ' + d.holds_cab_mates_min +
+          ' min after ' + d.cab_mates.map(function (id) { return (gs[id] || {}).name || id; }).join(', ') +
+          '. The others can leave without waiting; ' + ((gs[d.guest] || {}).name || d.guest) + ' gets an own pickup.' });
+      used[d.cab] = true;
+    });
+    return { suggestions: out };
+  }
+
+  return { buildInput: buildInput, buildMessages: buildMessages, parse: parse, extractJson: extractJson, ruleSuggestions: ruleSuggestions,
     RESPONSE_SCHEMA: RESPONSE_SCHEMA, ACTIONS: ACTIONS, MAX_STRETCH_MIN: MAX_STRETCH_MIN };
 });

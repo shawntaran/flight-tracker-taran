@@ -289,7 +289,7 @@
     }).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (j) {
         if (!r.ok || j.error) throw new Error(j.error || 'HTTP ' + r.status);
-        return { text: String(j.text || '') };
+        return { text: String(j.text || ''), fallback: !!j.fallback, modelError: j.modelError || '' };
       });
     });
   }

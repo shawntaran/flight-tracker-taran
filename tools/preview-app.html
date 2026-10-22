@@ -2306,7 +2306,12 @@
       setSmartBusy(false);
       var res = SmartDispatch.parse(r && r.text, ctx.index);
       if (res.error) smartStatus('The AI\'s answer could not be used (' + res.error + '). Try again.', 'error');
-      else renderSmartRun(res, ctx.index, groups.length);
+      else {
+        renderSmartRun(res, ctx.index, groups.length);
+        if (r && r.fallback) smartStatus('AI model unavailable' + (r.modelError ? ' (' + r.modelError + ')' : '') + ', so these come from the rule-based checks: ' +
+          (res.suggestions.length ? res.suggestions.length + ' suggestion' + (res.suggestions.length === 1 ? '' : 's') + ' (near-miss merges, cross-terminal pickups, delayed guests). Apply the ones you agree with.'
+            : 'nothing worth changing, the plan below stands.'));
+      }
     }).withFailureHandler(function (e) {
       setSmartBusy(false);
       smartStatus('Smart Cab Plan failed: ' + (e && e.message || e) + '. Run npm run assistant:health to check the model settings.', 'error');

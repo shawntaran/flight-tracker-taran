@@ -121,7 +121,7 @@ function handleModelPost(req, res, method) {
     let parsed;
     try { parsed = JSON.parse(body); } catch (e) { return sendJson(res, 400, { error: 'invalid JSON' }); }
     Promise.resolve().then(() => getOpsAssistant()[method](parsed)).then((r) => {
-      if (r.ok) sendJson(res, 200, { text: r.text });
+      if (r.ok) sendJson(res, 200, r.fallback ? { text: r.text, fallback: true, modelError: String(r.modelError || '').slice(0, 200) } : { text: r.text });
       else sendJson(res, 502, { error: r.error });
     }).catch((err) => sendJson(res, 500, { error: String(err && err.message || err) }));
   });

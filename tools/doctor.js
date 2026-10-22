@@ -177,7 +177,7 @@ const skipTests = process.env.DOCTOR_SKIP_TESTS === '1';
 if (skipTests) warn('Tests', 'skipped (DOCTOR_SKIP_TESTS=1)');
 for (const t of skipTests ? [] : ['test/run-tests.js', 'test/adb-tests.js', 'test/setup-tests.js', 'test/dashboard-tests.js', 'test/telegram-tests.js',
   'test/flight-sort-tests.js', 'test/flight-position-tests.js', 'test/cab-suggestions-tests.js', 'test/smart-dispatch-tests.js',
-  'test/guest-view-tests.js', 'test/sheet-source-tests.js', 'test/engine-tests.js', 'test/tracker-control-tests.js', 'test/env-example-guard-tests.js', 'local-assistant/test/assistant-tests.js']) {
+  'test/guest-view-tests.js', 'test/sheet-source-tests.js', 'test/engine-tests.js', 'test/tracker-control-tests.js', 'test/env-example-guard-tests.js', 'test/assistant-fallback-tests.js', 'local-assistant/test/assistant-tests.js']) {
   if (!fs.existsSync(path.join(ROOT, t))) continue;
   const r = spawnSync(process.execPath, [path.join(ROOT, t)], { cwd: ROOT, env, encoding: 'utf8' });
   const summary = (String(r.stdout).match(/(\d+) passed, (\d+) failed/) || [])[0] || 'no summary';
