@@ -1,4 +1,4 @@
-# Tracking engine (Node.js + Supabase, Vercel Cron)
+# Tracking engine (Node.js + Supabase, on Vercel, run by GitHub Actions)
 
 The 5-minute tracker without Google: it reads the `Flights` table in Supabase, checks flights with OpenSky, AeroDataBox and (optionally) FlightAware, writes the results back to `Flights`, re-plans the cab groups, sends Telegram alerts and updates the heartbeat in the `status` table.
 
@@ -39,13 +39,27 @@ The 5-minute tracker without Google: it reads the `Flights` table in Supabase, c
 
 ## Vercel
 
-- `vercel.json` schedules `GET /api/cron` every 5 minutes. The function may run for up to 60 s, and it ships `src/` and `engine/` with it.
+- `vercel.json` sets the `/api/cron` function to run for up to 60 s and to ship `src/` and `engine/` with it. It has no cron schedule: Vercel's Hobby plan allows only daily crons.
 - Environment variables (Project Settings → Environment Variables):
   - required: `CRON_SECRET` (any long random string), `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ADB_KEY`, `TG_BOT_TOKEN`
   - optional: `FA_KEY`, `OPENSKY_CLIENT_ID`, `OPENSKY_CLIENT_SECRET`
 
-  Vercel sends `CRON_SECRET` with each scheduled call, and any other caller gets HTTP 401.
-- **Plan limit:** on Vercel's Hobby plan, cron jobs run at most once a day. Every 5 minutes needs the Pro plan, or an external scheduler that calls `/api/cron` with `Authorization: Bearer <CRON_SECRET>`.
+  Every call must send `Authorization: Bearer <CRON_SECRET>`; any other caller gets HTTP 401.
+
+## Schedule (GitHub Actions)
+
+[`.github/workflows/tracker-cron.yml`](../.github/workflows/tracker-cron.yml) POSTs to `/api/cron` every 5 minutes.
+
+1. In the workflow, replace `YOUR_VERCEL_DOMAIN` with the live domain (for example `flight-tracker.vercel.app`).
+2. In the GitHub repository, go to Settings → Secrets and variables → Actions → New repository secret. Add `CRON_SECRET` with the same value as in Vercel.
+3. Commit and push to the default branch: GitHub only runs schedules from there. The Actions tab has a **Run workflow** button for a manual run.
+
+What to expect from GitHub's scheduler:
+- Under load, runs can start several minutes late, and occasionally one is skipped.
+- On a public repository, GitHub pauses schedules after 60 days without a commit, and you re-enable them in the Actions tab.
+- Each run takes one short job (about 10 s of a free-tier runner).
+
+The heartbeat in `status` shows whether runs are arriving.
 - Nothing from the repository is served publicly. The static output is the one-line `public/index.html`.
 
 ## Not carried over (yet)

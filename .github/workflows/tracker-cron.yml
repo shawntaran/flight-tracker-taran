@@ -1,0 +1,33 @@
+# Runs the flight tracker every 5 minutes by calling the Vercel endpoint (Vercel's Hobby plan only allows daily crons).
+# Before committing: replace YOUR_VERCEL_DOMAIN below with the live domain, e.g. flight-tracker.vercel.app.
+# Repository secret (Settings -> Secrets and variables -> Actions -> New repository secret):
+#   CRON_SECRET  the same value as CRON_SECRET in the Vercel project's environment variables
+# GitHub runs scheduled workflows only from the default branch, and may start them a few minutes late under load.
+
+name: Tracker cron
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}   # "Run workflow" button in the Actions tab, for a manual run
+
+concurrency:
+  group: tracker-cron
+  cancel-in-progress: false   # never cut a run short; the next one waits (the engine also holds its own lock)
+
+permissions: {}
+
+jobs:
+  run-tracker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Call the tracker endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then echo "::error::Repository secret CRON_SECRET is not set"; exit 1; fi
+          curl -X POST "https://YOUR_VERCEL_DOMAIN/api/cron" \
+            --header "Authorization: Bearer $CRON_SECRET" \
+            --silent --show-error --fail-with-body \
+            --max-time 90

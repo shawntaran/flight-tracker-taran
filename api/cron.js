@@ -1,6 +1,7 @@
 'use strict';
-// Vercel Cron Job: one tracker run every 5 minutes (schedule in vercel.json). Vercel calls this path with
-// "Authorization: Bearer <CRON_SECRET>"; any other caller is refused, so nobody else can spend the API budget.
+// One tracker run per call. GitHub Actions calls it every 5 minutes (.github/workflows/tracker-cron.yml; Vercel's
+// Hobby plan allows only daily crons) with "Authorization: Bearer <CRON_SECRET>"; any other caller is refused,
+// so nobody else can spend the API budget. Any HTTP method works (the workflow POSTs).
 // Environment (Vercel project settings -> Environment Variables):
 //   CRON_SECRET, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ADB_KEY, TG_BOT_TOKEN
 //   optional: FA_KEY, OPENSKY_CLIENT_ID, OPENSKY_CLIENT_SECRET

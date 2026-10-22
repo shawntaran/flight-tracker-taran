@@ -260,10 +260,17 @@ test('refuses callers without the CRON_SECRET bearer token, and refuses to run w
     res = fakeRes(); await cron({ headers: {} }, res); assert.strictEqual(res.code, 401);
   } finally { if (saved == null) delete process.env.CRON_SECRET; else process.env.CRON_SECRET = saved; }
 });
-test('vercel.json runs /api/cron every 5 minutes and ships the src/ logic files with the function', () => {
+test('vercel.json has no Vercel cron (Hobby plan) and ships the src/ logic files with the function', () => {
   const v = JSON.parse(fs.readFileSync(path.join(ROOT, 'vercel.json'), 'utf8'));
-  assert.deepStrictEqual(v.crons, [{ path: '/api/cron', schedule: '*/5 * * * *' }]);
+  assert.ok(!('crons' in v));
   assert.ok(/src/.test(v.functions['api/cron.js'].includeFiles) && /engine/.test(v.functions['api/cron.js'].includeFiles));
+});
+test('the GitHub Actions workflow POSTs to /api/cron every 5 minutes with the CRON_SECRET bearer token', () => {
+  const w = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'tracker-cron.yml'), 'utf8');
+  assert.ok(/cron: '\*\/5 \* \* \* \*'/.test(w));
+  assert.ok(/curl -X POST "https:\/\/[^"]+\/api\/cron"/.test(w));
+  assert.ok(/Authorization: Bearer \$CRON_SECRET/.test(w) && /CRON_SECRET: \$\{\{ secrets\.CRON_SECRET \}\}/.test(w));
+  assert.ok(!/cron-secret|Bearer [A-Za-z0-9]{12,}/.test(w), 'no secret value in the workflow');
 });
 test('environment: process.env wins over .env.engine; only known secrets are passed to the logic', () => {
   const e = readEnv({ SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'svc', ADB_KEY: 'a', OTHER: 'z' }, null);

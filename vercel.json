@@ -3,12 +3,6 @@
   "framework": null,
   "buildCommand": "",
   "outputDirectory": "public",
-  "crons": [
-    {
-      "path": "/api/cron",
-      "schedule": "*/5 * * * *"
-    }
-  ],
   "functions": {
     "api/cron.js": {
       "maxDuration": 60,
