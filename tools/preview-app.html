@@ -11,7 +11,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
 <style>
-  #guest-dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+  #guest-dialog::backdrop, #remove-dialog::backdrop { background: rgb(0 0 0 / 0.45); }
   :root {
     --background: 250 248 255; --surface-container-lowest: 255 255 255; --surface-container-low: 242 243 255;
     --surface-container: 234 237 255; --surface-container-high: 226 231 255;
@@ -721,10 +721,11 @@
     <!-- ===== ASSISTANT: answers come from the local model (tools/ops-assistant.js) with this page's flight data ===== -->
     <dialog id="guest-dialog" aria-labelledby="guest-title" class="w-[min(28rem,calc(100vw-2rem))] p-0 rounded-xl border border-outline-variant/40 bg-surface-container-lowest text-on-surface shadow-xl">
       <form id="guest-form" method="dialog" novalidate class="p-space-lg flex flex-col gap-space-md">
+        <input type="hidden" name="id" value="">
         <div class="flex items-start justify-between gap-space-sm">
           <div>
             <h2 id="guest-title" class="font-headline-sm text-headline-sm text-primary">Add guest</h2>
-            <p class="font-body-sm text-body-sm text-on-surface-variant">Saved to the Supabase Flights table. The tracker starts checking it on its next run.</p>
+            <p id="guest-sub" class="font-body-sm text-body-sm text-on-surface-variant">Saved to the Supabase Flights table. The tracker starts checking it on its next run.</p>
           </div>
           <button type="button" data-guest-close class="p-1 rounded hover:bg-surface-container-high text-on-surface-variant" aria-label="Close"><span class="material-symbols-outlined text-[20px]">close</span></button>
         </div>
@@ -747,12 +748,39 @@
             <input name="time" type="time" required class="h-10 px-3 rounded-lg bg-surface-container-low border border-outline-variant/50 font-body-md text-body-md text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40">
           </label>
         </div>
+        <div id="guest-edit-extra" class="hidden grid grid-cols-2 gap-space-sm items-end">
+          <label class="flex flex-col gap-1 font-label-md text-label-md"><span>Terminal <span class="font-body-sm text-[11px] text-on-surface-variant">(optional)</span></span>
+            <input name="terminal" maxlength="3" autocomplete="off" class="h-10 px-3 rounded-lg bg-surface-container-low border border-outline-variant/50 font-data-mono text-data-mono uppercase text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/40" placeholder="T2">
+          </label>
+          <label class="h-10 flex items-center gap-2 font-label-md text-label-md cursor-pointer select-none">
+            <input name="active" type="checkbox" class="w-4 h-4 accent-current"> Tracking on
+          </label>
+        </div>
         <p id="guest-error" role="alert" class="font-body-sm text-body-sm text-error empty:hidden"></p>
         <div class="flex justify-end gap-space-sm">
           <button type="button" data-guest-close class="h-9 px-3.5 rounded-lg bg-surface-container-low text-on-surface hover:bg-surface-container font-label-md text-label-md">Cancel</button>
           <button id="guest-save" type="submit" class="h-9 px-3.5 rounded-lg bg-primary text-on-primary hover:opacity-90 disabled:opacity-50 font-label-md text-label-md font-semibold">Add guest</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="remove-dialog" aria-labelledby="remove-title" class="w-[min(26rem,calc(100vw-2rem))] p-0 rounded-xl border border-outline-variant/40 bg-surface-container-lowest text-on-surface shadow-xl">
+      <div class="p-space-lg flex flex-col gap-space-md">
+        <div>
+          <h2 id="remove-title" class="font-headline-sm text-headline-sm text-primary">Remove guest flight</h2>
+          <p id="remove-what" class="font-body-md text-body-md text-on-surface mt-1"></p>
+        </div>
+        <ul class="flex flex-col gap-1.5 font-body-sm text-body-sm text-on-surface-variant">
+          <li><strong class="text-on-surface">Stop tracking</strong>: the row stays (with its history) and can be switched back on with Edit.</li>
+          <li><strong class="text-error">Delete permanently</strong>: the row is removed from Supabase. This cannot be undone.</li>
+        </ul>
+        <p id="remove-error" role="alert" class="font-body-sm text-body-sm text-error empty:hidden"></p>
+        <div class="flex flex-wrap justify-end gap-space-sm">
+          <button type="button" data-remove-cancel class="h-9 px-3.5 rounded-lg bg-surface-container-low text-on-surface hover:bg-surface-container font-label-md text-label-md">Cancel</button>
+          <button type="button" data-remove-mode="stop" class="h-9 px-3.5 rounded-lg bg-surface-container text-on-surface hover:bg-surface-container-high font-label-md text-label-md font-semibold">Stop tracking</button>
+          <button type="button" data-remove-mode="delete" class="h-9 px-3.5 rounded-lg bg-error text-white hover:opacity-90 font-label-md text-label-md font-semibold">Delete permanently</button>
+        </div>
+      </div>
     </dialog>
 
     <div class="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
@@ -1406,7 +1434,8 @@
       '<div class="flex flex-wrap items-center justify-end gap-space-xs">' +
         (FP.positionState(f, now).state !== 'unavailable' ? '<button type="button" data-show-map="' + esc(f.id) + '" class="px-3 py-1.5 rounded-lg bg-surface-container-low text-on-surface hover:bg-surface-container transition-colors font-label-md text-label-md flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">map</span>Show on map</button>' : '') +
         (cabInfo(f.id) ? '<button type="button" data-goto-suggestion="' + esc(cabInfo(f.id).key) + '" class="px-3 py-1.5 rounded-lg bg-primary text-on-primary hover:opacity-90 transition-opacity font-label-md text-label-md flex items-center gap-1 shadow-sm"><span class="material-symbols-outlined text-[16px]">local_taxi</span>View cab suggestion</button>' : '') +
-        '<button type="button" disabled class="px-3 py-1.5 rounded-lg bg-surface-container-low text-on-surface font-label-md text-label-md flex items-center gap-1 ft-off" title="Opens the Flights sheet row in production; not available in the local preview"><span class="material-symbols-outlined text-[16px]">open_in_new</span>Flight details</button>' +
+        (liveData() ? '<button type="button" data-edit-guest="' + esc(f.id) + '" class="px-3 py-1.5 rounded-lg bg-surface-container-low text-on-surface hover:bg-surface-container transition-colors font-label-md text-label-md flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">edit</span>Edit</button>' +
+          '<button type="button" data-remove-guest="' + esc(f.id) + '" class="px-3 py-1.5 rounded-lg bg-surface-container-low text-error hover:bg-error-container hover:text-on-error-container transition-colors font-label-md text-label-md flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">delete</span>Remove</button>' : '') +
         '<button type="button" disabled class="px-3 py-1.5 rounded-lg bg-surface-container-low text-on-surface font-label-md text-label-md flex items-center gap-1 ft-off" title="Force check runs only in the deployed Apps Script dashboard or the sheet menu (the local preview is read-only)"><span class="material-symbols-outlined text-[16px]">sync</span>Force check</button>' +
         '<button type="button" data-toggle="' + esc(f.id) + '" class="px-3 py-1.5 rounded-lg bg-surface-container-low text-on-surface hover:bg-surface-container transition-colors font-label-md text-label-md flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">expand_less</span>Collapse</button>' +
       '</div></div>';
@@ -2498,17 +2527,61 @@
   }
   var istToday = function () { return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date()); };
 
-  function openGuestDialog() {
-    if (!liveData()) return showNotice('Adding guests needs live Supabase data (this page is showing mock data).');
-    var f = $('guest-form');
+  var istDate = function (ms) { return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(ms); };
+  var istClock = function (ms) { return new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(ms); };
+  /** guest: a flight from state.data to edit, or nothing to add a new one. */
+  function openGuestDialog(guest) {
+    if (!liveData()) return showNotice('Adding or editing guests needs live Supabase data (this page is showing mock data).');
+    var f = $('guest-form'), edit = !!(guest && guest.id), when = edit ? FS.toMs(guest.schedAt) : null;
     f.reset();
-    f.elements.date.value = istToday();
+    f.elements.id.value = edit ? guest.id : '';
+    f.elements.date.value = when != null ? istDate(when) : istToday();
+    if (edit) {
+      f.elements.name.value = guest.name || ''; f.elements.flight.value = guest.flight || '';
+      f.elements.direction.value = guest.dir === 'DEP' ? 'Departure' : 'Arrival';
+      f.elements.time.value = when != null ? istClock(when) : '';
+      f.elements.terminal.value = guest.terminal || ''; f.elements.active.checked = guest.active !== false;
+    }
+    $('guest-title').textContent = edit ? 'Edit guest flight' : 'Add guest';
+    $('guest-sub').textContent = edit ? 'Row ' + guest.id + '. Changing the flight or the time makes the tracker start this leg afresh on its next run.'
+      : 'Saved to the Supabase Flights table. The tracker starts checking it on its next run.';
+    $('guest-save').textContent = edit ? 'Save changes' : 'Add guest';
+    $('guest-edit-extra').classList.toggle('hidden', !edit);
     $('guest-error').textContent = '';
-    $('guest-time-label').textContent = 'Scheduled arrival (IST)';
+    $('guest-time-label').textContent = f.elements.direction.value === 'Departure' ? 'Scheduled departure (IST)' : 'Scheduled arrival (IST)';
     $('guest-dialog').showModal();
     f.elements.name.focus();
   }
-  $('add-guest-btn').addEventListener('click', openGuestDialog);
+  var flightById = function (id) { return (state.data.flights || []).filter(function (x) { return x.id === id; })[0]; };
+  var removeId = null;
+  document.addEventListener('click', function (e) {
+    var ed = e.target.closest('[data-edit-guest]'), rm = e.target.closest('[data-remove-guest]');
+    if (ed) { var g = flightById(ed.getAttribute('data-edit-guest')); if (g) openGuestDialog(g); return; }
+    if (rm) {
+      var x = flightById(rm.getAttribute('data-remove-guest'));
+      if (!x) return;
+      removeId = x.id;
+      $('remove-what').textContent = (x.name || x.id) + ': ' + (x.dir === 'DEP' ? 'departure ' : 'arrival ') + (x.flight || '—') + (FS.toMs(x.schedAt) != null ? ', ' + dayTime(x.schedAt) + ' IST' : '') + ' (row ' + x.id + ')';
+      $('remove-error').textContent = '';
+      $('remove-dialog').showModal();
+    }
+  });
+  $$('[data-remove-cancel]').forEach(function (b) { b.addEventListener('click', function () { $('remove-dialog').close(); }); });
+  $$('[data-remove-mode]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var mode = b.getAttribute('data-remove-mode'), all = $$('[data-remove-mode], [data-remove-cancel]');
+      all.forEach(function (x) { x.disabled = true; });
+      postJson('/api/guests/delete', { id: removeId, mode: mode }).then(function (r) {
+        if (!r.ok) { $('remove-error').textContent = r.error || 'Could not remove this flight.'; return; }
+        $('remove-dialog').close();
+        showNotice((mode === 'delete' ? 'Deleted' : 'Stopped tracking') + ' row ' + r.id + '.' + (mode === 'stop' ? ' Switch it back on with Edit.' : ''));
+        if (mode === 'delete') { delete state.flights.expanded[r.id]; if (state.flights.selected === r.id) state.flights.selected = null; }
+        load(true);
+      }).catch(function (err) { $('remove-error').textContent = 'Could not reach the server: ' + (err && err.message || err); })
+        .then(function () { all.forEach(function (x) { x.disabled = false; }); });
+    });
+  });
+  $('add-guest-btn').addEventListener('click', function () { openGuestDialog(); });
   $$('[data-guest-close]').forEach(function (b) { b.addEventListener('click', function () { $('guest-dialog').close(); }); });
   $('guest-form').elements.direction.addEventListener('change', function (e) {
     $('guest-time-label').textContent = e.target.value === 'Departure' ? 'Scheduled departure (IST)' : 'Scheduled arrival (IST)';
@@ -2517,17 +2590,21 @@
     e.preventDefault();
     var f = e.target, v = { name: f.elements.name.value, flight: f.elements.flight.value, direction: f.elements.direction.value,
       date: f.elements.date.value, time: f.elements.time.value };
+    var editId = f.elements.id.value;
+    if (editId) { v.id = editId; v.terminal = f.elements.terminal.value; v.active = f.elements.active.checked; }
     var missing = ['name', 'flight', 'date', 'time'].filter(function (k) { return !String(v[k]).trim(); });
     if (missing.length) { $('guest-error').textContent = 'Fill in every field.'; f.elements[missing[0]].focus(); return; }
+    var label = editId ? 'Save changes' : 'Add guest';
     $('guest-save').disabled = true; $('guest-save').textContent = 'Saving…'; $('guest-error').textContent = '';
-    postJson('/api/guests', v).then(function (r) {
-      if (!r.ok) { $('guest-error').textContent = r.error || 'Could not add the guest.'; return; }
+    postJson(editId ? '/api/guests/update' : '/api/guests', v).then(function (r) {
+      if (!r.ok) { $('guest-error').textContent = r.error || (editId ? 'Could not save the changes.' : 'Could not add the guest.'); return; }
       $('guest-dialog').close();
-      showNotice('Added ' + r.row.Name + ' (' + r.row.Flight + ', ' + r.id + '). The tracker checks the flight on its next run.');
+      showNotice(editId ? 'Saved ' + r.row.Name + ' (' + r.row.Flight + ', row ' + r.id + ').' + (r.row.Active === false ? ' Tracking is off for this row.' : ' The tracker picks up the change on its next run.')
+        : 'Added ' + r.row.Name + ' (' + r.row.Flight + ', ' + r.id + '). The tracker checks the flight on its next run.');
       load(true);
     }).catch(function (err) {
       $('guest-error').textContent = 'Could not reach the preview server: ' + (err && err.message || err);
-    }).then(function () { $('guest-save').disabled = false; $('guest-save').textContent = 'Add guest'; });
+    }).then(function () { $('guest-save').disabled = false; $('guest-save').textContent = label; });
   });
 
   // "Picked up" marks (tools/pickups.js): saved for every coordinator; the page reloads to show them.

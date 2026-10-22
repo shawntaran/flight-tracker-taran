@@ -100,4 +100,59 @@ function createTrackerRunner(spawn, opts) {
   return { start, status: () => Object.assign({}, cur) };
 }
 
-module.exports = { validateGuest, nextId, createGuestInserter, createTrackerRunner };
+const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
+
+/**
+ * Edit and remove one Flights row, with the SERVICE-ROLE key (server side only; the anon key can read and add,
+ * never change or delete). Only coordinator columns are written; changing the flight or a time makes the tracker
+ * reset that leg's tracking on its next run (src/Tracker.js prepareRow).
+ * client: supabase-js with the service-role key. -> {update(body), remove(body)} -> {ok, ...} | {ok: false, error}
+ */
+function createGuestEditor(client, table) {
+  const t = table || 'Flights';
+  async function exists(id) {
+    const r = await client.from(t).select('ID').eq('ID', id);
+    if (r.error) return { error: 'Could not read the Flights table: ' + r.error.message };
+    return { found: !!(r.data && r.data.length) };
+  }
+
+  /** body: {id, name, flight, direction, date, time, terminal?, active?} -> the row's new coordinator values. */
+  async function update(body) {
+    const b = body || {};
+    if (!ID_RE.test(String(b.id || ''))) return { ok: false, error: 'Unknown guest row.' };
+    const v = validateGuest(b);
+    if (v.error) return { ok: false, error: v.error };
+    const term = text(b.terminal).toUpperCase().replace(/^(\d)$/, 'T$1');
+    if (term && !/^T\d$/.test(term)) return { ok: false, error: 'Terminal must be like T2 (or empty).' };
+    const patch = Object.assign({}, v.row, { Terminal: term || null });
+    if (typeof b.active === 'boolean') patch.Active = b.active; else delete patch.Active;
+    const e = await exists(b.id);
+    if (e.error) return { ok: false, error: e.error };
+    if (!e.found) return { ok: false, error: 'This guest row no longer exists (deleted elsewhere?). Refresh the page.' };
+    const r = await client.from(t).update(patch).eq('ID', b.id);
+    if (r.error) return { ok: false, error: 'Supabase refused the change: ' + r.error.message };
+    return { ok: true, id: b.id, row: patch };
+  }
+
+  /** body: {id, mode: 'stop' | 'delete'}. stop = Active false (kept, reversible); delete = row removed for good. */
+  async function remove(body) {
+    const b = body || {};
+    if (!ID_RE.test(String(b.id || ''))) return { ok: false, error: 'Unknown guest row.' };
+    if (b.mode !== 'stop' && b.mode !== 'delete') return { ok: false, error: 'Choose "stop tracking" or "delete".' };
+    const e = await exists(b.id);
+    if (e.error) return { ok: false, error: e.error };
+    if (!e.found) return { ok: false, error: 'This guest row no longer exists. Refresh the page.' };
+    if (b.mode === 'stop') {
+      const r = await client.from(t).update({ Active: false }).eq('ID', b.id);
+      return r.error ? { ok: false, error: 'Supabase refused the change: ' + r.error.message } : { ok: true, id: b.id, mode: 'stop' };
+    }
+    const r = await client.from(t).delete().eq('ID', b.id);
+    if (r.error) return { ok: false, error: 'Supabase refused the delete: ' + r.error.message };
+    await client.from('tracker_state').delete().eq('key', 'PICKUP_DONE:' + b.id); // its "picked up" mark goes too (best effort)
+    return { ok: true, id: b.id, mode: 'delete' };
+  }
+
+  return { update, remove };
+}
+
+module.exports = { validateGuest, nextId, createGuestInserter, createGuestEditor, createTrackerRunner };

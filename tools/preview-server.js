@@ -67,16 +67,25 @@ function getTrackerRunner() {
   return trackerRunner;
 }
 function invalidateSheetData() { if (sheetSource && sheetSource.invalidate) sheetSource.invalidate(); }
-// "Picked up" marks (tools/pickups.js): written with the engine's service-role key from .env.engine.
-let pickupStore = null;
-function getPickupStore() {
-  if (!pickupStore) {
+// Writes that need the engine's service-role key from .env.engine: "picked up" marks (tools/pickups.js) and
+// editing or removing a guest (tools/tracker-control.js). The anon key in the browser-facing config cannot do either.
+let serviceClient = null, pickupStore = null, guestEditor = null;
+function getServiceClient(what) {
+  if (!serviceClient) {
     const { readEnv, makeClient } = require('../engine/run');
     const env = readEnv(process.env, path.join(ROOT, '.env.engine'));
-    if (!env.supabaseUrl || !env.serviceKey) throw new Error('Saving "picked up" needs .env.engine with the service-role key on this server');
-    pickupStore = require('./pickups').createPickupStore(makeClient(env));
+    if (!env.supabaseUrl || !env.serviceKey) throw new Error(what + ' needs .env.engine with the service-role key on this server');
+    serviceClient = makeClient(env);
   }
+  return serviceClient;
+}
+function getPickupStore() {
+  pickupStore = pickupStore || require('./pickups').createPickupStore(getServiceClient('Saving "picked up"'));
   return pickupStore;
+}
+function getGuestEditor() {
+  guestEditor = guestEditor || require('./tracker-control').createGuestEditor(getServiceClient('Editing guests'));
+  return guestEditor;
 }
 
 /** POST with a JSON body from this page only (a cross-site page cannot send application/json without a preflight we never answer). */
@@ -219,6 +228,16 @@ function handleRequest(req, res) {
         if (r.ok) invalidateSheetData();
         sendJson(res, r.ok ? 201 : 400, r);
       }).catch((err) => sendJson(res, 500, { ok: false, error: String(err && err.message || err) }));
+    });
+    return;
+  }
+
+  if (pathname === '/api/guests/update' || pathname === '/api/guests/delete') {
+    readJsonPost(req, res, 4096, (body) => {
+      Promise.resolve().then(() => (pathname === '/api/guests/update' ? getGuestEditor().update(body) : getGuestEditor().remove(body))).then((r) => {
+        if (r.ok) invalidateSheetData();
+        sendJson(res, r.ok ? 200 : 400, r);
+      }).catch((err) => sendJson(res, 503, { ok: false, error: String(err && err.message || err) }));
     });
     return;
   }

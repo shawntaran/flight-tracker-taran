@@ -109,6 +109,61 @@ test('a run that hangs is stopped and reported', async () => {
   assert.ok(f.spawned[0].child.killed && /longer than 3 minutes/.test(r.status().error));
 });
 
+console.log('Edit and remove a guest');
+function fakeTables(rows) {
+  const db = { Flights: rows.map((r) => Object.assign({}, r)), tracker_state: [{ key: 'PICKUP_DONE:F1', value: '{}' }, { key: 'prop:ADB_USAGE_V1', value: '{}' }] };
+  const calls = [];
+  const q = (t) => {
+    const st = { op: 'select', f: [] };
+    const run = () => {
+      calls.push([st.op, t, st.f.map((x) => x.join('=')).join('&'), st.payload]);
+      const hit = (r) => st.f.every(([c, v]) => r[c] === v);
+      if (st.op === 'select') return { data: db[t].filter(hit), error: null };
+      if (st.op === 'update') { db[t].filter(hit).forEach((r) => Object.assign(r, st.payload)); return { data: null, error: null }; }
+      db[t] = db[t].filter((r) => !hit(r)); return { data: null, error: null };
+    };
+    const b = { select: () => b, update: (p) => { st.op = 'update'; st.payload = p; return b; }, delete: () => { st.op = 'delete'; return b; },
+      eq: (c, v) => { st.f.push([c, v]); return b; }, then: (res, rej) => Promise.resolve().then(run).then(res, rej) };
+    return b;
+  };
+  return { db, calls, from: q };
+}
+const ROW = { ID: 'F1', Name: 'Dr Asha Sharma', Direction: 'Arrival', Flight: 'EK 568', 'Sched Arr (IST)': '2026-10-25 04:50', Terminal: 'T2', Active: true,
+  Phone: '+91 90000 00001', Status: 'DELAYED', 'm:eta': '2026-10-24T23:37:00.000Z' };
+test('edit writes only coordinator columns of that one row; tracker columns and private ones are untouched', async () => {
+  const c = fakeTables([ROW, Object.assign({}, ROW, { ID: 'F2', Name: 'Someone Else' })]);
+  const r = await T.createGuestEditor(c).update({ id: 'F1', name: 'Dr Asha Sharma', flight: 'ek 236', direction: 'Arrival', date: '2026-10-25', time: '2:50', terminal: '3' });
+  assert.ok(r.ok, r.error);
+  const row = c.db.Flights.find((x) => x.ID === 'F1');
+  assert.deepStrictEqual([row.Flight, row['Sched Arr (IST)'], row.Terminal, row.Active], ['EK 236', '2026-10-25 02:50', 'T3', true]);
+  assert.deepStrictEqual([row.Phone, row.Status, row['m:eta']], [ROW.Phone, 'DELAYED', ROW['m:eta']], 'the tracker resets its own columns when it sees the change');
+  assert.strictEqual(c.db.Flights.find((x) => x.ID === 'F2').Flight, 'EK 568');
+  assert.ok(c.calls.some((x) => x[0] === 'update' && x[2] === 'ID=F1'));
+});
+test('switching direction moves the time to the other schedule column; Active can be turned off and on', async () => {
+  const c = fakeTables([ROW]), ed = T.createGuestEditor(c);
+  await ed.update({ id: 'F1', name: 'Dr Asha Sharma', flight: 'EK569', direction: 'Departure', date: '2026-11-01', time: '09:00', terminal: '', active: false });
+  const row = c.db.Flights[0];
+  assert.deepStrictEqual([row.Direction, row['Sched Arr (IST)'], row['Sched Dep (IST)'], row.Terminal, row.Active], ['Departure', null, '2026-11-01 09:00', null, false]);
+});
+test('bad edits are refused before Supabase: unknown row, bad flight or terminal, missing time', async () => {
+  const c = fakeTables([ROW]), ed = T.createGuestEditor(c);
+  const base = { id: 'F1', name: 'X Y', flight: 'EK568', direction: 'Arrival', date: '2026-10-25', time: '04:50' };
+  assert.ok(/no longer exists/.test((await ed.update(Object.assign({}, base, { id: 'F9' }))).error));
+  for (const bad of [{ id: 'F1; drop' }, { flight: 'tbd' }, { terminal: 'Gate 4' }, { time: '' }]) assert.ok(!(await ed.update(Object.assign({}, base, bad))).ok, JSON.stringify(bad));
+  assert.ok(!c.calls.some((x) => x[0] !== 'select'), 'nothing was written');
+});
+test('remove: "stop" keeps the row with tracking off; "delete" removes it and its picked-up mark; nothing else', async () => {
+  const c = fakeTables([ROW, Object.assign({}, ROW, { ID: 'F2' })]), ed = T.createGuestEditor(c);
+  assert.ok((await ed.remove({ id: 'F1', mode: 'stop' })).ok);
+  assert.strictEqual(c.db.Flights.find((x) => x.ID === 'F1').Active, false);
+  assert.ok((await ed.remove({ id: 'F1', mode: 'delete' })).ok);
+  assert.deepStrictEqual(c.db.Flights.map((x) => x.ID), ['F2']);
+  assert.deepStrictEqual(c.db.tracker_state.map((x) => x.key), ['prop:ADB_USAGE_V1']);
+  assert.ok(!(await ed.remove({ id: 'F2', mode: 'everything' })).ok && !(await ed.remove({ id: 'F2' })).ok);
+  assert.ok(/no longer exists/.test((await ed.remove({ id: 'F1', mode: 'delete' })).error));
+});
+
 console.log('Picked up (cab suggestions)');
 const P = require(path.join(ROOT, 'tools', 'pickups.js'));
 function fakeStateClient() {
@@ -167,6 +222,11 @@ test('POST endpoints accept JSON from this page only; GET /api/tracker/run repor
     assert.strictEqual((await request(port, 'GET', '/api/guests')).code, 405);
     assert.strictEqual((await request(port, 'POST', '/api/tracker/run', { 'Content-Type': 'application/json', Origin: 'https://evil.example' }, '{}')).code, 403);
     assert.strictEqual((await request(port, 'POST', '/api/pickups', { 'Content-Type': 'application/json', Origin: 'https://evil.example' }, '{}')).code, 403);
+    for (const route of ['/api/guests/update', '/api/guests/delete']) {
+      assert.strictEqual((await request(port, 'POST', route, { 'Content-Type': 'application/json', Origin: 'https://evil.example' }, '{"id":"F1","mode":"delete"}')).code, 403, route);
+      assert.strictEqual((await request(port, 'POST', route, { 'Content-Type': 'text/plain' }, '{}')).code, 415, route);
+      assert.strictEqual((await request(port, 'GET', route)).code, 405, route);
+    }
     assert.strictEqual((await request(port, 'POST', '/api/pickups', { 'Content-Type': 'text/plain' }, '{}')).code, 415);
     const viaProxy = await request(port, 'POST', '/api/guests', { 'Content-Type': 'application/json', Origin: 'https://localhost:' + port }, '{"name":""}');
     assert.notStrictEqual(viaProxy.code, 403, 'the same host over https (behind the HTTPS proxy) is accepted');
@@ -176,7 +236,8 @@ test('POST endpoints accept JSON from this page only; GET /api/tracker/run repor
 });
 test('the page has both controls and never sends a key: it only calls the preview server', () => {
   const page = fs.readFileSync(path.join(ROOT, 'tools', 'preview-app.html'), 'utf8');
-  ['id="add-guest-btn"', 'id="guest-dialog"', 'id="run-tracker-btn"', "postJson('/api/guests'", "postJson('/api/tracker/run')"].forEach((s) => assert.ok(page.includes(s), s));
+  ['id="add-guest-btn"', 'id="guest-dialog"', 'id="run-tracker-btn"', "'/api/guests/update' : '/api/guests', v)", "postJson('/api/tracker/run')",
+    'data-edit-guest="', 'data-remove-guest="', 'id="remove-dialog"', "'/api/guests/update'", "postJson('/api/guests/delete'"].forEach((s) => assert.ok(page.includes(s), s));
   assert.ok(!/supabase\.co|SUPABASE_|CRON_SECRET|createClient/.test(page));
 });
 
