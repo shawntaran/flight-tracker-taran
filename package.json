@@ -8,10 +8,11 @@
   "scripts": {
     "prepare": "node tools/install-hooks.js",
     "check:env-examples": "node tools/check-env-examples.js --all",
-    "test": "node test/run-tests.js && node test/adb-tests.js && node test/setup-tests.js && node test/dashboard-tests.js && node test/telegram-tests.js && node test/flight-sort-tests.js && node test/flight-position-tests.js && node test/cab-suggestions-tests.js && node test/smart-dispatch-tests.js && node test/assistant-fallback-tests.js && node test/guest-view-tests.js && node test/sheet-source-tests.js && node test/engine-tests.js && node test/tracker-control-tests.js && node test/env-example-guard-tests.js && node local-assistant/test/assistant-tests.js",
+    "test": "node test/run-tests.js && node test/adb-tests.js && node test/setup-tests.js && node test/dashboard-tests.js && node test/telegram-tests.js && node test/flight-sort-tests.js && node test/flight-position-tests.js && node test/cab-suggestions-tests.js && node test/smart-dispatch-tests.js && node test/assistant-fallback-tests.js && node test/import-guests-tests.js && node test/guest-view-tests.js && node test/sheet-source-tests.js && node test/engine-tests.js && node test/tracker-control-tests.js && node test/env-example-guard-tests.js && node local-assistant/test/assistant-tests.js",
     "doctor": "node tools/doctor.js",
     "preview": "node tools/preview-server.js",
     "push": "clasp push",
+    "import:guests": "node tools/import-guests.js",
     "tracker:run": "node engine/run.js",
     "tracker:dry-run": "node engine/run.js --dry-run",
     "tracker:usage": "node engine/run.js --usage",
