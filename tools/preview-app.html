@@ -152,7 +152,9 @@
 <body class="bg-background font-body-md text-body-md text-on-surface antialiased">
 
 <!-- ===== SIDEBAR ===== -->
-<aside class="hidden lg:flex fixed top-0 left-0 h-screen w-64 bg-surface-container-lowest border-r border-outline-variant/30 z-50 flex-col justify-between">
+<!-- Mobile (< lg): off-screen until the header's menu button slides it in over a backdrop. Desktop: always visible. -->
+<div id="sidebar-backdrop" class="hidden lg:hidden fixed inset-0 z-[55] bg-black/50" aria-hidden="true"></div>
+<aside id="sidebar" aria-label="Navigation" class="flex fixed top-0 left-0 h-screen h-[100dvh] w-64 max-w-[85vw] overflow-y-auto bg-surface-container-lowest border-r border-outline-variant/30 z-[60] flex-col justify-between -translate-x-full lg:translate-x-0 transition-transform duration-200 ease-out shadow-xl lg:shadow-none">
   <div class="flex flex-col">
     <div class="h-16 px-space-md flex items-center gap-space-sm border-b border-outline-variant/20">
       <div class="h-8 w-8 rounded-lg bg-primary text-on-primary flex items-center justify-center"><span class="material-symbols-outlined text-[18px]">flight_land</span></div>
@@ -160,6 +162,7 @@
         <span class="font-headline-sm text-headline-sm text-primary tracking-tight truncate leading-none">Flight Tracker</span>
         <span class="font-label-sm text-label-sm text-secondary uppercase font-bold tracking-wider mt-0.5">ITW 2026</span>
       </div>
+      <button id="sidebar-close" type="button" class="lg:hidden ml-auto p-1.5 rounded hover:bg-surface-container-high text-on-surface-variant" aria-label="Close navigation"><span class="material-symbols-outlined text-[22px]">close</span></button>
     </div>
     <div class="px-space-md py-space-sm"><span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant/70 px-space-xs">Navigation</span></div>
     <nav class="flex flex-col gap-space-xs px-space-sm">
@@ -197,11 +200,14 @@
 
   <!-- ===== HEADER ===== -->
   <header class="fixed top-0 left-0 lg:left-64 right-0 h-16 bg-surface-container-lowest/90 backdrop-blur-md border-b border-outline-variant/30 z-40 px-gutter flex items-center justify-between">
+    <div class="flex items-center gap-2 min-w-0">
+    <button id="menu-btn" type="button" class="lg:hidden -ml-1.5 p-1.5 rounded hover:bg-surface-container-high text-on-surface shrink-0" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false"><span class="material-symbols-outlined text-[24px]">menu</span></button>
     <div class="flex flex-col min-w-0">
       <span id="page-title" class="font-headline-sm text-headline-sm text-primary leading-tight">Flight Operations</span>
       <span id="page-subtitle" class="font-body-sm text-body-sm text-on-surface-variant hidden sm:inline truncate">Monitor arrivals, departures, and airport transfers</span>
       <!-- Where this data comes from (always visible): the tracked flights table, or Import-column schedules only -->
       <span id="data-source-line" class="font-data-mono text-[10px] leading-tight text-on-surface-variant truncate"></span>
+    </div>
     </div>
     <div class="flex items-center gap-space-md">
       <div class="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded bg-surface-container-low border border-outline-variant/40">
@@ -845,7 +851,29 @@
     'api-usage':     { title: 'API Usage',            subtitle: 'Flight data provider quotas and request history' },
     'settings':      { title: 'Settings',             subtitle: 'System configuration and preferences' }
   };
+  // ===== MOBILE SIDEBAR =====
+  var desktopMq = window.matchMedia('(min-width: 1024px)'); // Tailwind's lg
+  var sidebarOpen = false;
+  function setSidebar(open, restoreFocus) {
+    sidebarOpen = !!open && !desktopMq.matches;
+    var aside = $('sidebar');
+    aside.classList.toggle('-translate-x-full', !sidebarOpen);
+    aside.inert = !sidebarOpen && !desktopMq.matches;          // off-screen links are not focusable
+    $('sidebar-backdrop').classList.toggle('hidden', !sidebarOpen);
+    $('menu-btn').setAttribute('aria-expanded', sidebarOpen ? 'true' : 'false');
+    document.body.classList.toggle('overflow-hidden', sidebarOpen); // no page scroll behind the menu
+    if (sidebarOpen) $('sidebar-close').focus();
+    else if (restoreFocus) $('menu-btn').focus();
+  }
+  $('menu-btn').addEventListener('click', function () { setSidebar(true); });
+  $('sidebar-close').addEventListener('click', function () { setSidebar(false, true); });
+  $('sidebar-backdrop').addEventListener('click', function () { setSidebar(false, true); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && sidebarOpen) setSidebar(false, true); });
+  (desktopMq.addEventListener ? desktopMq.addEventListener.bind(desktopMq, 'change') : desktopMq.addListener.bind(desktopMq))(function () { setSidebar(false); });
+  setSidebar(false);
+
   function navigate(page) {
+    if (sidebarOpen) setSidebar(false);
     if (page === 'cab-groups') { page = 'cab-suggestions'; try { history.replaceState(null, '', '#cab-suggestions'); } catch (e) {} } // old links
     if (!PAGE_META[page]) page = 'overview';
     state.page = page;
