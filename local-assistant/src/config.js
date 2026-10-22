@@ -12,7 +12,7 @@ const KEYS = ['TG_BOT_TOKEN', 'ALLOWED_CHAT_IDS', 'SUPABASE_URL', 'SUPABASE_ANON
   'LLM_BASE_URL', 'LLM_MODEL', 'LLM_API_KEY', 'LLM_TIMEOUT_MS', 'STATE_DIR', 'RATE_LIMIT_PER_MIN', 'MAX_QUESTION_CHARS',
   'PREVIEW_SOURCE'];
 const PLACEHOLDER_MODEL = 'your-model-name';
-const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
+const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite'; // measured 1-5 s; gemini-3.8-flash took 15-50 s on the free tier
 
 /** Pure: KEY=VALUE text -> object. '#' comments, optional quotes, no interpolation. */
 function parseEnv(text) {

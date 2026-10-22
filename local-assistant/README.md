@@ -49,10 +49,10 @@ cp local-assistant/.env.local-assistant.example local-assistant/.env.local-assis
 ```
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=<the key>
-GEMINI_MODEL=gemini-3.8-flash
+GEMINI_MODEL=gemini-3.5-flash-lite
 ```
 
-The bot, the dashboard's Flight Assistant and the Smart Cab Plan all switch together; they go through Google's `@google/genai` SDK (`local-assistant/src/llm.js`). `npm run assistant:health` looks the model up by name, so a wrong `GEMINI_MODEL` shows up there. On the free tier Google may use what is sent to improve its products: the bot sends names, flight numbers, statuses and times, never phone numbers or emails. Set `LLM_PROVIDER` blank to go back to the endpoint below.
+The bot, the dashboard's Flight Assistant and the Smart Cab Plan all switch together; they go through Google's `@google/genai` SDK (`local-assistant/src/llm.js`). `npm run assistant:health` looks the model up by name, so a wrong `GEMINI_MODEL` shows up there. A -lite model answers in seconds; on the free tier the larger flash models took 15-50 s per answer and were often "experiencing high demand" (one automatic retry covers a brief spike). On the free tier Google may use what is sent to improve its products: the bot sends names, flight numbers, statuses and times, never phone numbers or emails. Set `LLM_PROVIDER` blank to go back to the endpoint below.
 
 **Your own server instead:** any server with an OpenAI-compatible `POST /v1/chat/completions` works. Only `LLM_BASE_URL`, `LLM_MODEL` and, when needed, `LLM_API_KEY` change between setups.
 

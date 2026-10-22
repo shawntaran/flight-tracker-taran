@@ -468,7 +468,7 @@ const geminiLlm = (genai, over) => createModel(Object.assign({ provider: 'gemini
   enabled: true, redact: makeRedactor([FAKE_GEMINI]), genai }, over || {}));
 test('Gemini: LLM_PROVIDER=gemini picks the Gemini client; the Ollama lines stay for switching back', () => {
   const g = buildConfig(Object.assign({}, BASE, { LLM_PROVIDER: 'gemini', GEMINI_API_KEY: FAKE_GEMINI, LLM_MODEL: 'gemma4:latest' })).config.llm;
-  assert.deepStrictEqual([g.provider, g.model, g.apiKey, g.enabled], ['gemini', 'gemini-3.8-flash', FAKE_GEMINI, true]);
+  assert.deepStrictEqual([g.provider, g.model, g.apiKey, g.enabled], ['gemini', 'gemini-3.5-flash-lite', FAKE_GEMINI, true]);
   assert.strictEqual(buildConfig(Object.assign({}, BASE, { LLM_PROVIDER: 'gemini', GEMINI_API_KEY: FAKE_GEMINI, GEMINI_MODEL: 'gemini-x' })).config.llm.model, 'gemini-x');
   const off = buildConfig(Object.assign({}, BASE, { LLM_PROVIDER: 'gemini' }));
   assert.ok(!off.config.llm.enabled && off.problems.some((p) => p.key === 'GEMINI_API_KEY' && p.level === 'warn'));
@@ -497,6 +497,11 @@ test('Gemini failures become {ok:false} with a usable hint and never the key; th
   assert.ok(/blocked this key's project/.test(denied.error) && !/check GEMINI_API_KEY/.test(denied.error), denied.error);
   assert.ok(/check LLM_MODEL/.test((await fail(Object.assign(new Error('models/gemini-9 is not found'), { status: 404 }))).error));
   assert.ok(/rate limit or quota/.test((await fail(Object.assign(new Error('RESOURCE_EXHAUSTED'), { status: 429 }))).error));
+  let n = 0;
+  const busy = await geminiLlm(fakeGenai(() => { if (n++ === 0) throw Object.assign(new Error('This model is currently experiencing high demand.'), { status: 503 }); return { text: 'second try' }; }).genai, { timeoutMs: 10000 }).chat([{ role: 'user', content: 'q' }]);
+  assert.deepStrictEqual([busy, n], [{ ok: true, text: 'second try' }, 2], 'one retry after a 503');
+  const busy2 = await geminiLlm(fakeGenai(() => { throw Object.assign(new Error('high demand'), { status: 503 }); }).genai, { timeoutMs: 10000 }).chat([{ role: 'user', content: 'q' }]);
+  assert.ok(!busy2.ok && /servers for this model are busy/.test(busy2.error), busy2.error);
   const slow = await geminiLlm(fakeGenai(() => new Promise(() => {})).genai, { timeoutMs: 30 }).chat([{ role: 'user', content: 'q' }]);
   assert.ok(!slow.ok && /timed out after 30 ms/.test(slow.error));
   const empty = await geminiLlm(fakeGenai({ text: '', candidates: [{ finishReason: 'MAX_TOKENS' }] }).genai).chat([{ role: 'user', content: 'q' }]);
@@ -521,7 +526,7 @@ test('the dashboard assistant and Smart Cab Plan use Gemini too (no Ollama probi
   const ops = require(path.join(__dirname, '..', '..', 'tools', 'ops-assistant.js')).createOpsAssistant({ envFile: env, genai: f.genai,
     fetch: async (u) => { fetched.push(u); throw new Error('no network in tests'); } });
   const s = await ops.status();
-  assert.deepStrictEqual([s.online, s.model], [true, 'gemini-3.8-flash']);
+  assert.deepStrictEqual([s.online, s.model], [true, 'gemini-3.5-flash-lite']);
   const d = await ops.dispatch({ input: { cabs: [{ id: 'A1', guests: ['F1'] }], guests: [{ id: 'F1' }], rules: { window_min: 45, max_seats: 4 } } });
   assert.deepStrictEqual(d, { ok: true, text: '{"groups":[]}' });
   assert.deepStrictEqual(fetched, [], 'nothing went to an Ollama URL');

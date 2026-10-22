@@ -74,6 +74,7 @@ function createLlm({ baseUrl, model, apiKey, timeoutMs, enabled, fetch, redact }
 // become systemInstruction; assistant turns become role "model". No tools: the model can only return text.
 const GEMINI_HOST = 'https://generativelanguage.googleapis.com';
 const THINKING_HEADROOM = 2048; // thinking models spend output tokens before answering; the prompts keep answers short
+const RETRY_PAUSE_MS = 1500;
 
 /** genai: (apiKey) -> GoogleGenAI-like client; injected by tests, the real SDK otherwise. */
 function createGeminiLlm({ model, apiKey, timeoutMs, enabled, redact, genai }) {
@@ -86,6 +87,7 @@ function createGeminiLlm({ model, apiKey, timeoutMs, enabled, redact, genai }) {
     const hint = /denied access|project has been/i.test(s) ? ' (Google has blocked this key\'s project from Gemini, e.g. a university account: create a key with a personal Google account at aistudio.google.com)'
       : /^(401|403)$/.test(String(status)) || /API key not valid|PERMISSION_DENIED/i.test(s) ? ' (check GEMINI_API_KEY)'
       : String(status) === '404' || /not found/i.test(s) ? ' (check LLM_MODEL: the model name was not found)'
+        : String(status) === '503' || /high demand|UNAVAILABLE/i.test(s) ? ' (Google\'s servers for this model are busy; a -lite model such as gemini-3.5-flash-lite is usually much faster)'
         : String(status) === '429' || /RESOURCE_EXHAUSTED|quota/i.test(s) ? ' (free-tier rate limit or quota reached; try again shortly)' : '';
     return redact((status ? 'HTTP ' + status + hint + ': ' : '') + s).slice(0, 200);
   };
@@ -116,9 +118,19 @@ function createGeminiLlm({ model, apiKey, timeoutMs, enabled, redact, genai }) {
     const config = { temperature: 0, maxOutputTokens: (o.maxTokens || 600) + THINKING_HEADROOM, abortSignal: ctl.signal };
     if (g.systemInstruction) config.systemInstruction = g.systemInstruction;
     if (o.responseFormat && o.responseFormat.type === 'json_object') config.responseMimeType = 'application/json';
+    const started = Date.now();
+    const call = () => withTimeout(ai().models.generateContent({ model, contents: g.contents, config }), timeoutMs - (Date.now() - started));
     let res;
     try {
-      res = await withTimeout(ai().models.generateContent({ model, contents: g.contents, config }), timeoutMs);
+      try {
+        res = await call();
+      } catch (e) {
+        // "This model is currently experiencing high demand" (503): one retry after a short pause, if time allows.
+        const busy = String((e && (e.status || e.code)) || '') === '503' || /UNAVAILABLE|high demand|overloaded/i.test(String((e && e.message) || ''));
+        if (!busy || timeoutMs - (Date.now() - started) < RETRY_PAUSE_MS + 2000) throw e;
+        await new Promise((r) => setTimeout(r, RETRY_PAUSE_MS));
+        res = await call();
+      }
     } catch (e) {
       ctl.abort();
       return { ok: false, error: safe(e) };
