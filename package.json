@@ -1,15 +1,19 @@
 {
   "name": "faculty-flight-tracker",
   "private": true,
-  "description": "Google Apps Script flight tracker + cab grouping for visiting faculty",
+  "description": "Flight tracker + cab grouping for visiting faculty: Apps Script version and a Node/Supabase engine for Vercel",
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "test": "node test/run-tests.js && node test/adb-tests.js && node test/setup-tests.js && node test/dashboard-tests.js && node test/telegram-tests.js && node test/flight-sort-tests.js && node test/flight-position-tests.js && node test/cab-suggestions-tests.js && node test/smart-dispatch-tests.js && node test/guest-view-tests.js && node test/sheet-source-tests.js && node local-assistant/test/assistant-tests.js",
+    "test": "node test/run-tests.js && node test/adb-tests.js && node test/setup-tests.js && node test/dashboard-tests.js && node test/telegram-tests.js && node test/flight-sort-tests.js && node test/flight-position-tests.js && node test/cab-suggestions-tests.js && node test/smart-dispatch-tests.js && node test/guest-view-tests.js && node test/sheet-source-tests.js && node test/engine-tests.js && node local-assistant/test/assistant-tests.js",
     "doctor": "node tools/doctor.js",
     "preview": "node tools/preview-server.js",
     "push": "clasp push",
+    "tracker:run": "node engine/run.js",
+    "tracker:dry-run": "node engine/run.js --dry-run",
+    "tracker:usage": "node engine/run.js --usage",
+    "test:engine": "node test/engine-tests.js",
     "assistant": "node local-assistant/src/main.js start",
     "assistant:auth": "node local-assistant/src/main.js auth",
     "assistant:health": "node local-assistant/src/main.js health",

@@ -27,6 +27,8 @@ It runs on free tiers: AeroDataBox Basic, OpenSky, Telegram, Gmail and Apps Scri
 
 Secrets never go in code, in the sheet, in the manifest, or in git. `.env.example` only lists the secret names; Apps Script does not read `.env` files.
 
+**Moving to Supabase and Vercel:** the table above describes the Apps Script version. A Node.js version of the same tracker runs on Supabase as a Vercel Cron Job; it uses the same decision code from `src/` and no Google services. See [engine/README.md](engine/README.md) for setup and for the order of the cutover (stop the Apps Script trigger first, so flights are not looked up and alerted twice).
+
 ## Setup guide
 
 Each step is marked 🖐 if you do it by hand, or ⚙️ if it's automated or a single command.

@@ -38,6 +38,10 @@ npm-debug.log*
 # --- Local Telegram assistant (local-assistant/) ------------------------------------
 # Its filled-in config is already covered by ".env.*" above; keep the example tracked.
 !.env.local-assistant.example
+# Tracking engine (engine/): local runs read .env.engine (ignored by ".env.*"); keep the example tracked.
+!.env.engine.example
+# Vercel CLI link folder
+.vercel/
 # Polling offset and the Google OAuth token
 local-assistant/.state/
 

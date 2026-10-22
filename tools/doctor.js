@@ -29,7 +29,7 @@ else warn('clasp', 'not installed. Needed only to deploy with clasp: npm install
 // 2. Expected files
 const expected = ['src/appsscript.json', 'src/AdbClient.js', 'src/Alerts.js', 'src/Config.js', 'src/Diagnostics.js',
   'src/Dashboard.js', 'src/DashboardPage.html', 'src/Grouping.js', 'src/Menu.js', 'src/Providers.js', 'src/Sheet.js', 'src/Tracker.js', 'src/Util.js',
-  'test/run-tests.js', 'test/adb-tests.js', 'test/setup-tests.js', 'test/dashboard-tests.js', 'test/telegram-tests.js', 'test/sheet-source-tests.js', 'tools/sheet-source.js', 'local-assistant/src/main.js', 'local-assistant/test/assistant-tests.js', 'local-assistant/.env.local-assistant.example', 'local-assistant/README.md', 'README.md', 'AUDIT.md', 'PROJECT_STATUS.md',
+  'test/run-tests.js', 'test/adb-tests.js', 'test/setup-tests.js', 'test/dashboard-tests.js', 'test/telegram-tests.js', 'test/sheet-source-tests.js', 'test/engine-tests.js', 'engine/core.js', 'engine/run.js', 'engine/supabase-store.js', 'api/cron.js', 'vercel.json', 'tools/sheet-source.js', 'local-assistant/src/main.js', 'local-assistant/test/assistant-tests.js', 'local-assistant/.env.local-assistant.example', 'local-assistant/README.md', 'README.md', 'AUDIT.md', 'PROJECT_STATUS.md',
   '.gitignore', '.env.example', '.clasp.json.example', 'package.json'];
 const missing = expected.filter((f) => !fs.existsSync(path.join(ROOT, f)));
 if (missing.length) fail('Files', 'missing: ' + missing.join(', '));
@@ -177,7 +177,7 @@ const skipTests = process.env.DOCTOR_SKIP_TESTS === '1';
 if (skipTests) warn('Tests', 'skipped (DOCTOR_SKIP_TESTS=1)');
 for (const t of skipTests ? [] : ['test/run-tests.js', 'test/adb-tests.js', 'test/setup-tests.js', 'test/dashboard-tests.js', 'test/telegram-tests.js',
   'test/flight-sort-tests.js', 'test/flight-position-tests.js', 'test/cab-suggestions-tests.js', 'test/smart-dispatch-tests.js',
-  'test/guest-view-tests.js', 'test/sheet-source-tests.js', 'local-assistant/test/assistant-tests.js']) {
+  'test/guest-view-tests.js', 'test/sheet-source-tests.js', 'test/engine-tests.js', 'local-assistant/test/assistant-tests.js']) {
   if (!fs.existsSync(path.join(ROOT, t))) continue;
   const r = spawnSync(process.execPath, [path.join(ROOT, t)], { cwd: ROOT, env, encoding: 'utf8' });
   const summary = (String(r.stdout).match(/(\d+) passed, (\d+) failed/) || [])[0] || 'no summary';

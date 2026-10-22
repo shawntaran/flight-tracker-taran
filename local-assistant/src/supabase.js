@@ -122,4 +122,4 @@ function createSupabase({ url, anonKey, redact, client }) {
   return { readRange };
 }
 
-module.exports = { createSupabase, toRows, headerFor, TABLES };
+module.exports = { createSupabase, toRows, headerFor, sameNameOtherCase, TABLES };
