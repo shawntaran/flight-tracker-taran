@@ -493,6 +493,8 @@ test('Gemini failures become {ok:false} with a usable hint and never the key; th
   const fail = (err) => geminiLlm(fakeGenai(() => { throw err; }).genai).chat([{ role: 'user', content: 'q' }]);
   const r401 = await fail(Object.assign(new Error('API key not valid: ' + FAKE_GEMINI), { status: 400 }));
   assert.ok(!r401.ok && /check GEMINI_API_KEY/.test(r401.error) && !r401.error.includes(FAKE_GEMINI), r401.error);
+  const denied = await fail(Object.assign(new Error('{"error":{"code":403,"message":"Your project has been denied access. Please contact support.","status":"PERMISSION_DENIED"}}'), { status: 403 }));
+  assert.ok(/blocked this key's project/.test(denied.error) && !/check GEMINI_API_KEY/.test(denied.error), denied.error);
   assert.ok(/check LLM_MODEL/.test((await fail(Object.assign(new Error('models/gemini-9 is not found'), { status: 404 }))).error));
   assert.ok(/rate limit or quota/.test((await fail(Object.assign(new Error('RESOURCE_EXHAUSTED'), { status: 429 }))).error));
   const slow = await geminiLlm(fakeGenai(() => new Promise(() => {})).genai, { timeoutMs: 30 }).chat([{ role: 'user', content: 'q' }]);

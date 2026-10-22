@@ -83,7 +83,8 @@ function createGeminiLlm({ model, apiKey, timeoutMs, enabled, redact, genai }) {
   const safe = (e) => {
     const s = String((e && e.message) || e || '');
     const status = (e && (e.status || e.code)) || (s.match(/"code":\s*(\d{3})/) || s.match(/\b(4\d\d|5\d\d)\b/) || [])[1];
-    const hint = /^(401|403)$/.test(String(status)) || /API key not valid|PERMISSION_DENIED/i.test(s) ? ' (check GEMINI_API_KEY)'
+    const hint = /denied access|project has been/i.test(s) ? ' (Google has blocked this key\'s project from Gemini, e.g. a university account: create a key with a personal Google account at aistudio.google.com)'
+      : /^(401|403)$/.test(String(status)) || /API key not valid|PERMISSION_DENIED/i.test(s) ? ' (check GEMINI_API_KEY)'
       : String(status) === '404' || /not found/i.test(s) ? ' (check LLM_MODEL: the model name was not found)'
         : String(status) === '429' || /RESOURCE_EXHAUSTED|quota/i.test(s) ? ' (free-tier rate limit or quota reached; try again shortly)' : '';
     return redact((status ? 'HTTP ' + status + hint + ': ' : '') + s).slice(0, 200);

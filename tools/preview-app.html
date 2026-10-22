@@ -2157,7 +2157,7 @@
     }).withFailureHandler(function (e) {
       typing.remove();
       chat.messages.pop(); // an unanswered question is not part of the conversation the model sees next time
-      bubble('The assistant could not answer: ' + (e && e.message || e) + '. Check that Ollama is running (npm run assistant:health).', 'error');
+      bubble('The assistant could not answer: ' + (e && e.message || e) + '. Run npm run assistant:health to check the model settings.', 'error');
       chat.statusAt = 0; refreshAssistantStatus();
       setBusy(false);
     }).askAssistant(payload);
@@ -2231,7 +2231,7 @@
       else renderSmartRun(res, ctx.index, groups.length);
     }).withFailureHandler(function (e) {
       setSmartBusy(false);
-      smartStatus('Smart Cab Plan failed: ' + (e && e.message || e) + '. Check that Ollama is running (npm run assistant:health).', 'error');
+      smartStatus('Smart Cab Plan failed: ' + (e && e.message || e) + '. Run npm run assistant:health to check the model settings.', 'error');
     }).smartDispatch(ctx.input);
   }
 
