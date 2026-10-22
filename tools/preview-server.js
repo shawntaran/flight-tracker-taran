@@ -67,6 +67,17 @@ function getTrackerRunner() {
   return trackerRunner;
 }
 function invalidateSheetData() { if (sheetSource && sheetSource.invalidate) sheetSource.invalidate(); }
+// "Picked up" marks (tools/pickups.js): written with the engine's service-role key from .env.engine.
+let pickupStore = null;
+function getPickupStore() {
+  if (!pickupStore) {
+    const { readEnv, makeClient } = require('../engine/run');
+    const env = readEnv(process.env, path.join(ROOT, '.env.engine'));
+    if (!env.supabaseUrl || !env.serviceKey) throw new Error('Saving "picked up" needs .env.engine with the service-role key on this server');
+    pickupStore = require('./pickups').createPickupStore(makeClient(env));
+  }
+  return pickupStore;
+}
 
 /** POST with a JSON body from this page only (a cross-site page cannot send application/json without a preflight we never answer). */
 function readJsonPost(req, res, limit, cb) {
@@ -208,6 +219,16 @@ function handleRequest(req, res) {
         if (r.ok) invalidateSheetData();
         sendJson(res, r.ok ? 201 : 400, r);
       }).catch((err) => sendJson(res, 500, { ok: false, error: String(err && err.message || err) }));
+    });
+    return;
+  }
+
+  if (pathname === '/api/pickups') {
+    readJsonPost(req, res, 4096, (body) => {
+      Promise.resolve().then(() => getPickupStore()(body)).then((r) => {
+        if (r.ok) invalidateSheetData();
+        sendJson(res, r.ok ? 200 : 400, r);
+      }).catch((err) => sendJson(res, 503, { ok: false, error: String(err && err.message || err) }));
     });
     return;
   }

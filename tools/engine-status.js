@@ -9,6 +9,7 @@ const path = require('path');
 const { createCore } = require('../engine/core');
 const { createStore } = require('../engine/supabase-store');
 const { readEnv, makeClient, REQUEST_LOG, EVENT_LOG } = require('../engine/run');
+const { readMarks } = require('./pickups');
 
 const ENV_FILE = path.join(__dirname, '..', '.env.engine');
 const parseList = (s) => { try { const v = JSON.parse(s || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } };
@@ -20,7 +21,7 @@ const parseList = (s) => { try { const v = JSON.parse(s || '[]'); return Array.i
 function summarize(stateMap, configRows, nowMs, secretsSet) {
   const view = { get: (k) => (stateMap.has(k) ? stateMap.get(k) : null), set: () => {}, del: () => {} }; // read-only
   const core = createCore(view, { config: configRows || [] }, { now: () => nowMs, log: () => {} });
-  const out = { usage: null, usageError: '', apiRequests: [], log: [], providers: {} };
+  const out = { usage: null, usageError: '', apiRequests: [], log: [], providers: {}, pickupsDone: readMarks(stateMap) };
   try {
     const u = core.usageSummary();
     out.usage = { window: u.window, units: u.units, unitLimit: u.unitLimit, requests: u.requests, requestLimit: u.requestLimit,

@@ -109,6 +109,40 @@ test('a run that hangs is stopped and reported', async () => {
   assert.ok(f.spawned[0].child.killed && /longer than 3 minutes/.test(r.status().error));
 });
 
+console.log('Picked up (cab suggestions)');
+const P = require(path.join(ROOT, 'tools', 'pickups.js'));
+function fakeStateClient() {
+  const rows = new Map(), calls = [];
+  return { rows, calls, from: (t) => ({
+    upsert: (list, o) => { calls.push(['upsert', t, o]); list.forEach((r) => rows.set(r.key, r.value)); return Promise.resolve({ error: null }); },
+    delete: () => ({ in: (col, keys) => { calls.push(['delete', t, col, keys]); keys.forEach((k) => rows.delete(k)); return Promise.resolve({ error: null }); } })
+  }) };
+}
+test('marking saves one row per person, with the flight and time it was made for; undo removes exactly those rows', async () => {
+  const c = fakeStateClient(), set = P.createPickupStore(c, () => 1000);
+  const r = await set({ done: true, items: [{ id: 'F1001', flight: 'EK568', schedAt: 5000 }, { id: 'F1004', flight: 'QR572', schedAt: 6000 }] });
+  assert.deepStrictEqual(r, { ok: true, count: 2 });
+  assert.deepStrictEqual(P.readMarks(c.rows), { F1001: { at: 1000, flight: 'EK568', schedAt: 5000 }, F1004: { at: 1000, flight: 'QR572', schedAt: 6000 } });
+  assert.strictEqual(c.calls[0][1], 'tracker_state');
+  await set({ done: false, items: [{ id: 'F1001' }] });
+  assert.deepStrictEqual(Object.keys(P.readMarks(c.rows)), ['F1004']);
+  assert.deepStrictEqual(c.calls[1].slice(2), ['key', ['PICKUP_DONE:F1001']]);
+});
+test('bad requests never reach the database', async () => {
+  const c = fakeStateClient(), set = P.createPickupStore(c);
+  for (const body of [{}, { done: 'yes', items: [{ id: 'F1' }] }, { done: true, items: [] }, { done: true, items: [{ id: 'F1; drop' }] },
+    { done: true, items: Array.from({ length: 13 }, (_, i) => ({ id: 'F' + i })) }]) assert.ok(!(await set(body)).ok, JSON.stringify(body));
+  assert.strictEqual(c.calls.length, 0);
+});
+test('other tracker_state rows (usage accounting, locks) are never read as marks', () => {
+  const m = new Map([['prop:ADB_USAGE_V1', '{}'], ['LOCK_TICK', 'x'], ['PICKUP_DONE:F9', '{"at":1,"flight":"AI1","schedAt":null}'], ['PICKUP_DONE:F8', 'not json']]);
+  assert.deepStrictEqual(P.readMarks(m), { F9: { at: 1, flight: 'AI1', schedAt: null } });
+});
+test('the cab cards show a date on every suggestion and the picked-up controls', () => {
+  const page = fs.readFileSync(path.join(ROOT, 'tools', 'preview-app.html'), 'utf8');
+  ['dayName(sg.pickupMs, now)', 'data-pickup="', 'data-pickup-all="', 'id="cs-done-wrap"', "postJson('/api/pickups'"].forEach((s) => assert.ok(page.includes(s), s));
+});
+
 console.log('preview server routes');
 function request(port, method, p, headers, body) {
   return new Promise((resolve, reject) => {
@@ -132,6 +166,8 @@ test('POST endpoints accept JSON from this page only; GET /api/tracker/run repor
     assert.strictEqual((await request(port, 'POST', '/api/guests', { 'Content-Type': 'application/json', Origin: 'https://evil.example' }, '{}')).code, 403);
     assert.strictEqual((await request(port, 'GET', '/api/guests')).code, 405);
     assert.strictEqual((await request(port, 'POST', '/api/tracker/run', { 'Content-Type': 'application/json', Origin: 'https://evil.example' }, '{}')).code, 403);
+    assert.strictEqual((await request(port, 'POST', '/api/pickups', { 'Content-Type': 'application/json', Origin: 'https://evil.example' }, '{}')).code, 403);
+    assert.strictEqual((await request(port, 'POST', '/api/pickups', { 'Content-Type': 'text/plain' }, '{}')).code, 415);
     const viaProxy = await request(port, 'POST', '/api/guests', { 'Content-Type': 'application/json', Origin: 'https://localhost:' + port }, '{"name":""}');
     assert.notStrictEqual(viaProxy.code, 403, 'the same host over https (behind the HTTPS proxy) is accepted');
     const s = await request(port, 'GET', '/api/tracker/run');

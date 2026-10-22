@@ -61,7 +61,7 @@ console.log('mapping (Flights tab -> dashboard contract)');
 test('the payload has exactly the dashboard contract keys plus source and lastTick', async () => {
   const d = await source(fullTabs()).get();
   assert.deepStrictEqual(Object.keys(d).sort(), ['apiRequests', 'assistant', 'attribution', 'errors', 'flights', 'generatedAt', 'groups', 'homeAirport', 'lastTick',
-    'log', 'maxSeats', 'preview', 'providers', 'source', 'tickTriggers', 'usage', 'usageError'].sort());
+    'log', 'maxSeats', 'pickupsDone', 'preview', 'providers', 'source', 'tickTriggers', 'usage', 'usageError'].sort());
   assert.deepStrictEqual(Object.keys(d.flights[0]).sort(), ['active', 'airport', 'depActualAt', 'depSchedAt', 'dir', 'etaAt', 'etaSource', 'final', 'flight', 'gate', 'groupId', 'id',
     'invalid', 'lastCheckDisp', 'lastError', 'name', 'pickupDisp', 'schedAt', 'status', 'terminal'].sort());
   assert.strictEqual(d.source, S.SOURCE_FLIGHTS);

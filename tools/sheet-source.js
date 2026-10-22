@@ -111,7 +111,7 @@ function payload(now, conf, source, flights, groups, errors, lastTick, engine) {
   return {
     generatedAt: now, preview: false, source, homeAirport: conf.homeAirport, maxSeats: conf.maxSeats, attribution: ATTRIBUTION,
     flights, groups, log: e.log || [], tickTriggers, usage: e.usage || null, usageError: e.usage ? '' : e.usageError || USAGE_NOTE,
-    apiRequests: e.apiRequests || [], providers: e.providers || {}, errors, assistant: { enabled: false }, lastTick
+    apiRequests: e.apiRequests || [], providers: e.providers || {}, pickupsDone: e.pickupsDone || {}, errors, assistant: { enabled: false }, lastTick
   };
 }
 

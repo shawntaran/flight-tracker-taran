@@ -209,25 +209,25 @@
       <span id="data-source-line" class="font-data-mono text-[10px] leading-tight text-on-surface-variant truncate"></span>
     </div>
     </div>
-    <div class="flex items-center gap-space-md">
-      <div class="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded bg-surface-container-low border border-outline-variant/40">
+    <div class="flex items-center gap-space-sm xl:gap-space-md shrink-0">
+      <div class="hidden md:flex shrink-0 items-center gap-1.5 px-2.5 py-1 rounded bg-surface-container-low border border-outline-variant/40 whitespace-nowrap">
         <span class="material-symbols-outlined text-[16px] text-on-surface-variant">calendar_today</span>
         <span id="today" class="font-data-mono text-data-mono text-on-surface font-medium">Today</span>
       </div>
-      <div id="sync-chip" class="hidden lg:flex items-center gap-1.5 px-2 py-0.5 rounded bg-tertiary-fixed/20 border border-tertiary-fixed-dim/40 text-on-tertiary-fixed-variant">
+      <div id="sync-chip" class="hidden 2xl:flex shrink-0 items-center gap-1.5 px-2 py-0.5 rounded bg-tertiary-fixed/20 border border-tertiary-fixed-dim/40 text-on-tertiary-fixed-variant max-w-[22rem]">
         <span id="sync-dot" class="w-1.5 h-1.5 rounded-full bg-on-tertiary-container"></span>
-        <span id="sync-label" class="font-label-sm text-label-sm uppercase font-semibold">Live Syncing (OpenSky / ADB)</span>
+        <span id="sync-label" class="font-label-sm text-label-sm uppercase font-semibold whitespace-nowrap truncate">Live Syncing (OpenSky / ADB)</span>
       </div>
-      <div class="flex items-center gap-space-xs text-on-surface-variant">
-        <span id="synced-ago" class="font-data-mono text-data-mono hidden xl:inline">Loading…</span>
-        <button id="add-guest-btn" type="button" class="h-8 px-2.5 rounded-lg bg-primary text-on-primary hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity font-label-md text-label-md font-semibold flex items-center gap-1" title="Add a guest to the Flights table"><span class="material-symbols-outlined text-[18px]">person_add</span><span class="hidden sm:inline">Add guest</span></button>
+      <div class="flex items-center gap-space-xs text-on-surface-variant shrink-0">
+        <span id="synced-ago" class="font-data-mono text-data-mono hidden 2xl:inline whitespace-nowrap">Loading…</span>
+        <button id="add-guest-btn" type="button" class="h-8 px-2.5 shrink-0 whitespace-nowrap rounded-lg bg-primary text-on-primary hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity font-label-md text-label-md font-semibold flex items-center gap-1" title="Add a guest to the Flights table"><span class="material-symbols-outlined text-[18px]">person_add</span><span class="hidden sm:inline">Add guest</span></button>
         <button data-refresh class="p-1.5 rounded hover:bg-surface-container-high hover:text-on-surface transition-colors" title="Refresh data" type="button"><span class="material-symbols-outlined text-[18px]">refresh</span></button>
         <button id="theme-toggle-btn" class="p-1.5 rounded hover:bg-surface-container-high hover:text-on-surface transition-colors flex items-center justify-center" title="Toggle theme" aria-label="Toggle dark mode" type="button"><span id="theme-icon" class="material-symbols-outlined text-[18px]">dark_mode</span></button>
       </div>
       <div class="h-5 w-px bg-outline-variant/30 hidden sm:block"></div>
       <div class="flex items-center gap-space-sm pl-space-xs" title="Sign-in is not available yet">
         <div class="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center ring-1 ring-outline-variant/40 ft-off"><span class="material-symbols-outlined text-[18px] text-on-surface-variant">person</span></div>
-        <div class="hidden md:flex flex-col min-w-0 text-left ft-off">
+        <div class="hidden 2xl:flex flex-col min-w-0 text-left ft-off whitespace-nowrap">
           <span class="font-label-md text-label-md text-on-surface leading-tight">Coordinator</span>
           <span class="font-label-sm text-label-sm text-on-surface-variant">Profile not available</span>
         </div>
@@ -608,6 +608,10 @@
         <h2 class="px-1 font-label-sm text-label-sm uppercase tracking-wider font-bold text-on-surface-variant">Individual pickup suggested</h2>
         <div id="cs-individual" class="grid grid-cols-1 md:grid-cols-2 gap-space-md"></div>
       </section>
+      <details id="cs-done-wrap" class="hidden bg-surface-container-lowest rounded-xl shadow-sm px-space-md py-space-sm">
+        <summary id="cs-done-sum" class="cursor-pointer font-label-sm text-label-sm uppercase tracking-wider font-bold text-on-surface-variant">Picked up</summary>
+        <div id="cs-done" class="grid grid-cols-1 md:grid-cols-2 gap-space-md pt-space-sm"></div>
+      </details>
       <details id="cs-excluded-wrap" class="bg-surface-container-lowest rounded-xl shadow-sm px-space-md py-space-sm">
         <summary id="cs-excluded-sum" class="cursor-pointer font-label-sm text-label-sm uppercase tracking-wider font-bold text-on-surface-variant">Not suggested</summary>
         <ul id="cs-excluded" class="divide-y divide-outline-variant/15 pt-1 font-body-sm text-[12.5px]"></ul>
@@ -1201,6 +1205,16 @@
     var dd = FS.istDayOffset(v, now);
     return hm(v) + (dd ? '<sup class="ml-0.5 text-[9px] font-semibold">' + (dd > 0 ? '+' : '') + dd + '</sup>' : '');
   }
+  var dayFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short' });
+  /** 'Sat 25 Oct' plus 'Today' / 'Tomorrow' / 'Yesterday' when it applies. */
+  function dayName(ms, now) {
+    var v = FS.toMs(ms);
+    if (v == null) return 'Date unknown';
+    var dd = FS.istDayOffset(v, now);
+    return dayFmt.format(v) + (dd === 0 ? ' · Today' : dd === 1 ? ' · Tomorrow' : dd === -1 ? ' · Yesterday' : '');
+  }
+  /** 'Sat 25 Oct, 00:47' (no +1 superscripts to decode). */
+  function dayTime(ms) { var v = FS.toMs(ms); return v == null ? '--:--' : dayFmt.format(v) + ', ' + hm(v); }
   function km(n) { return typeof n === 'number' && isFinite(n) ? Math.round(n).toLocaleString('en-IN') + ' km' : ''; }
   function tone(f) {
     var s = f.status || 'SCHEDULED';
@@ -1784,11 +1798,25 @@
     return out.sort(function (x, y) { return x.rank - y.rank || (x.t || 0) - (y.t || 0); });
   }
 
+  /** A "picked up" mark counts only for the flight and time it was made for (an edited guest starts fresh). */
+  function pickedUp(f) {
+    var m = state.data && state.data.pickupsDone && state.data.pickupsDone[f.id];
+    return !!m && (!m.flight || m.flight === String(f.flight || '')) && (m.schedAt == null || m.schedAt === FS.toMs(f.schedAt));
+  }
+  function cardDone(sg) { return sg.members.length > 0 && sg.members.every(function (m) { return pickedUp(m.f); }); }
+
   function suggestionCard(sg, now) {
     var shared = sg.kind === 'shared';
     var meet = sg.crossTerminal ? 'Terminals ' + sg.terminals.join(' → ') + ' · start at ' + sg.terminals[0]
       : sg.terminal ? 'Terminal ' + sg.terminal.replace(/^T/, '') + ' · arrivals' : 'Arrivals · terminal not confirmed';
-    return '<article data-suggestion="' + esc(sg.key) + '" class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md flex flex-col gap-space-sm">' +
+    var done = cardDone(sg), live = !state.data.preview;
+    state.cabCards = state.cabCards || {};
+    state.cabCards[sg.key] = sg.members.map(function (m) { return m.f; });
+    var dd = FS.istDayOffset(FS.toMs(sg.pickupMs), now);
+    return '<article data-suggestion="' + esc(sg.key) + '" class="bg-surface-container-lowest rounded-xl shadow-sm p-space-md flex flex-col gap-space-sm' + (done ? ' opacity-75' : '') + '">' +
+      '<div class="-mx-space-md -mt-space-md px-space-md py-2 rounded-t-xl flex items-center justify-between gap-2 ' + (dd === 0 ? 'bg-secondary-fixed text-on-secondary-fixed' : 'bg-surface-container-low text-on-surface') + '">' +
+        '<span class="flex items-center gap-1.5 font-label-md text-label-md font-semibold"><span class="material-symbols-outlined text-[16px]">event</span>' + esc(dayName(sg.pickupMs, now)) + '</span>' +
+        (done ? '<span class="flex items-center gap-1 font-label-sm text-[11px] font-semibold text-on-tertiary-container"><span class="material-symbols-outlined text-[15px]">task_alt</span>Picked up</span>' : '') + '</div>' +
       '<div class="flex items-start justify-between gap-2">' +
         '<div class="flex items-center gap-2 min-w-0"><span class="w-8 h-8 shrink-0 rounded-lg flex items-center justify-center ' + (shared ? 'bg-secondary-fixed text-on-secondary-fixed' : 'bg-surface-container text-on-surface-variant') + '">' +
           '<span class="material-symbols-outlined text-[18px]">' + (shared ? 'local_taxi' : 'person') + '</span></span>' +
@@ -1797,7 +1825,7 @@
           '<span class="font-body-sm text-[12px] text-on-surface-variant">' + esc(meet) + '</span></div></div>' +
         '<span class="shrink-0 px-2 py-0.5 rounded-full bg-surface-container font-data-mono text-[11px] text-on-surface">' + sg.members.length + (sg.members.length === 1 ? ' passenger' : ' passengers') + '</span></div>' +
       '<div class="flex items-baseline gap-x-2 gap-y-1 flex-wrap"><span class="font-label-sm text-label-sm uppercase tracking-wider text-on-surface-variant">Suggested pickup</span>' +
-        '<span class="text-[1.25rem] leading-7 font-semibold text-on-surface">~' + hmd(sg.pickupMs, now) + '</span><span class="font-data-mono text-[11px] text-on-surface-variant">IST</span>' +
+        '<span class="text-[1.25rem] leading-7 font-semibold text-on-surface">~' + hm(FS.toMs(sg.pickupMs)) + '</span><span class="font-data-mono text-[11px] text-on-surface-variant">IST · ' + esc(dayFmt.format(FS.toMs(sg.pickupMs))) + '</span>' +
         (sg.pickupPassed ? '<span class="px-1.5 rounded bg-surface-container text-on-surface-variant font-label-sm text-[10px] uppercase">Time passed</span>' : '') + '</div>' +
       '<p class="flex items-start gap-1.5 font-body-sm text-[12.5px] text-on-surface-variant"><span class="material-symbols-outlined text-[16px] text-secondary shrink-0">info</span><span>' + esc(sg.reason) + '</span></p>' +
       '<ul class="flex flex-col divide-y divide-outline-variant/15">' + sg.members.map(function (m) {
@@ -1806,8 +1834,15 @@
           '<span class="font-label-md text-label-md font-semibold text-on-surface truncate">' + esc(f.name || f.id) + '</span>' +
           '<a href="#flights" data-flight-link="' + esc(f.id) + '" class="font-data-mono text-[11px] text-secondary hover:underline w-fit">' + esc(f.flight) + (f.origin ? ' from ' + esc(f.origin) : '') + '</a></div>' +
           '<div class="flex flex-col items-end gap-1 shrink-0">' + flightPill(f) +
-          '<span class="font-data-mono text-[11px] text-on-surface-variant">' + (f.status === 'LANDED' ? 'Landed ' : 'ETA ') + hmd(m.t, now) + (m.basis === 'scheduled' ? ' (sched)' : '') + '</span></div></li>';
+          '<span class="font-data-mono text-[11px] text-on-surface-variant whitespace-nowrap">' + (f.status === 'LANDED' ? 'Landed ' : 'ETA ') + esc(dayTime(m.t)) + (m.basis === 'scheduled' ? ' (sched)' : '') + '</span>' +
+          (live ? '<button type="button" data-pickup="' + esc(f.id) + '" data-done="' + (pickedUp(f) ? '0' : '1') + '" class="flex items-center gap-1 px-2 py-0.5 rounded-full font-label-sm text-[11px] font-semibold whitespace-nowrap transition-colors ' +
+            (pickedUp(f) ? 'bg-tertiary-fixed text-on-tertiary-fixed-variant hover:opacity-80" title="Undo: mark as not picked up">' + '<span class="material-symbols-outlined text-[14px]">check_circle</span>Picked up'
+              : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface" title="Mark this person as picked up">' + '<span class="material-symbols-outlined text-[14px]">radio_button_unchecked</span>Not picked up') + '</button>' : '') +
+          '</div></li>';
       }).join('') + '</ul>' +
+      (live && sg.members.length > 1 ? '<button type="button" data-pickup-all="' + esc(sg.key) + '" data-done="' + (done ? '0' : '1') + '" class="self-start flex items-center gap-1.5 h-8 px-3 rounded-lg font-label-md text-label-md font-semibold whitespace-nowrap ' +
+        (done ? 'bg-surface-container-low text-on-surface hover:bg-surface-container"><span class="material-symbols-outlined text-[16px]">undo</span>Undo: not picked up'
+          : 'bg-primary text-on-primary hover:opacity-90"><span class="material-symbols-outlined text-[16px]">task_alt</span>Mark all picked up') + '</button>' : '') +
       '<p class="font-label-sm text-[10px] uppercase tracking-wider text-on-surface-variant/80">' + SUGGEST_NOTE + '</p></article>';
   }
 
@@ -1830,10 +1865,17 @@
     $('cs-summary').textContent = cm.error || (cm.shared.length + (cm.shared.length === 1 ? ' shared suggestion' : ' shared suggestions') + ' for ' + sharing + ' people · ' +
       cm.individual.length + ' individual ' + (cm.individual.length === 1 ? 'pickup' : 'pickups') +
       (cm.overrides && cm.overrides.length ? ' · ' + cm.overrides.length + ' AI ' + (cm.overrides.length === 1 ? 'override' : 'overrides') + ' applied' : ''));
-    $('cs-shared').innerHTML = cm.shared.length ? cm.shared.map(function (x) { return suggestionCard(x, now); }).join('')
-      : '<p class="md:col-span-2 bg-surface-container-lowest rounded-xl shadow-sm p-space-md font-body-sm text-body-sm text-on-surface-variant">No arrivals are close enough to share a cab right now.</p>';
-    $('cs-individual-wrap').classList.toggle('hidden', !cm.individual.length);
-    $('cs-individual').innerHTML = cm.individual.map(function (x) { return suggestionCard(x, now); }).join('');
+    state.cabCards = {};
+    var openShared = cm.shared.filter(function (x) { return !cardDone(x); }), openIndiv = cm.individual.filter(function (x) { return !cardDone(x); });
+    var doneCards = cm.shared.concat(cm.individual).filter(cardDone).sort(function (a, b) { return a.pickupMs - b.pickupMs; });
+    $('cs-shared').innerHTML = openShared.length ? openShared.map(function (x) { return suggestionCard(x, now); }).join('')
+      : '<p class="md:col-span-2 bg-surface-container-lowest rounded-xl shadow-sm p-space-md font-body-sm text-body-sm text-on-surface-variant">' +
+        (cm.shared.length ? 'Every shared cab is marked picked up.' : 'No arrivals are close enough to share a cab right now.') + '</p>';
+    $('cs-individual-wrap').classList.toggle('hidden', !openIndiv.length);
+    $('cs-individual').innerHTML = openIndiv.map(function (x) { return suggestionCard(x, now); }).join('');
+    $('cs-done-wrap').classList.toggle('hidden', !doneCards.length);
+    $('cs-done-sum').textContent = 'Picked up (' + doneCards.length + ')';
+    $('cs-done').innerHTML = doneCards.map(function (x) { return suggestionCard(x, now); }).join('');
     $('cs-excluded-wrap').classList.toggle('hidden', !cm.excluded.length);
     $('cs-excluded-sum').textContent = 'Not suggested (' + cm.excluded.length + ')';
     $('cs-excluded').innerHTML = cm.excluded.map(function (x) {
@@ -1842,7 +1884,7 @@
     }).join('');
     var c = cm.config || {};
     $('cs-rules').textContent = c.windowMin ? 'Same rules as the tracker: grouped by terminal, arrivals within ' + c.windowMin + ' min of the first person, up to ' + c.maxSeats +
-      ' per cab, pickup about ' + c.bufferMin + ' min after the last arrival. Recalculated on every refresh; nothing is saved.' : '';
+      ' per cab, pickup about ' + c.bufferMin + ' min after the last arrival. Recalculated on every refresh; only "picked up" marks are saved.' : '';
     if (state.highlightSuggestion) {
       var el = document.querySelector('[data-suggestion="' + CSS.escape(state.highlightSuggestion) + '"]');
       state.highlightSuggestion = null;
@@ -2481,6 +2523,21 @@
     }).catch(function (err) {
       $('guest-error').textContent = 'Could not reach the preview server: ' + (err && err.message || err);
     }).then(function () { $('guest-save').disabled = false; $('guest-save').textContent = 'Add guest'; });
+  });
+
+  // "Picked up" marks (tools/pickups.js): saved for every coordinator; the page reloads to show them.
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-pickup], [data-pickup-all]');
+    if (!b) return;
+    var fl = b.hasAttribute('data-pickup-all') ? (state.cabCards || {})[b.getAttribute('data-pickup-all')] || []
+      : (state.data.flights || []).filter(function (f) { return f.id === b.getAttribute('data-pickup'); });
+    if (!fl.length) return;
+    b.disabled = true; b.classList.add('opacity-50');
+    postJson('/api/pickups', { done: b.getAttribute('data-done') === '1',
+      items: fl.map(function (f) { return { id: f.id, flight: String(f.flight || ''), schedAt: FS.toMs(f.schedAt) }; }) }).then(function (r) {
+      if (!r.ok) { b.disabled = false; b.classList.remove('opacity-50'); showNotice('Could not save: ' + (r.error || 'unknown error')); return; }
+      load(true);
+    }).catch(function (err) { b.disabled = false; b.classList.remove('opacity-50'); showNotice('Could not reach the server: ' + (err && err.message || err)); });
   });
 
   var RUN_POLL_MS = 3000, HEARTBEAT_TRIES = 4;
