@@ -13,6 +13,7 @@ const { createTelegram, ALLOWED } = require(path.join(SRC, 'telegram'));
 const { createOffsetStore } = require(path.join(SRC, 'state'));
 const { createSupabase, toRows, TABLES } = require(path.join(SRC, 'supabase'));
 const { parseTime } = require(path.join(SRC, 'time'));
+const { createGoogle, SCOPE } = require(path.join(SRC, 'google'));
 const { createLlm } = require(path.join(SRC, 'llm'));
 const { buildSnapshot } = require(path.join(SRC, 'snapshot'));
 const A = require(path.join(SRC, 'answers'));
@@ -22,6 +23,7 @@ const { createWorker, createSnapshotSource } = require(path.join(SRC, 'worker'))
 const FAKE_TG = '123456789' + ':AAFakeTokenForTestsOnly_abcdefghijklmnop';
 const FAKE_KEY = 'sk-' + 'fakeModelKeyForTests0123456789';
 const FAKE_ANON = 'sb_publishable_' + 'fakeAnonKeyForTests0123';
+const FAKE_SECRET = 'GOCSPX-' + 'fakeClientSecretForTests';
 const MIN = 60 * 1000;
 const NOW = Date.parse('2026-10-21T02:30:00Z'); // Wed 21 Oct 08:00 IST
 const iso = (ms) => new Date(ms).toISOString();
@@ -89,7 +91,8 @@ test('the example config parses; local Ollama default; placeholder model disable
   ['TG_BOT_TOKEN', 'ALLOWED_CHAT_IDS', 'SUPABASE_URL', 'SUPABASE_ANON_KEY',
     'LLM_BASE_URL', 'LLM_MODEL', 'LLM_API_KEY', 'LLM_TIMEOUT_MS'].forEach((k) => assert.ok(k in ex, k));
   assert.ok(!ex.TG_BOT_TOKEN && !ex.LLM_API_KEY && !ex.SUPABASE_ANON_KEY, 'example holds no secrets');
-  assert.ok(!Object.keys(ex).some((k) => /^GOOGLE_/.test(k)), 'no Google Sheets settings left');
+  assert.ok(!ex.GOOGLE_OAUTH_CLIENT_SECRET, 'example holds no Google secret');
+  assert.ok(!buildConfig(Object.assign({}, ex, BASE)).problems.some((p) => /^GOOGLE_/.test(p.key)), 'Google settings are optional');
   const { config, problems } = buildConfig(Object.assign({}, ex, BASE));
   assert.strictEqual(config.llm.baseUrl, 'http://127.0.0.1:11434/v1');
   assert.strictEqual(config.llm.enabled, false);
@@ -422,14 +425,40 @@ test('a service-role or secret Supabase key is refused; the anon key is accepted
   assert.ok(buildConfig(Object.assign({}, BASE, { SUPABASE_URL: 'not a url' })).problems.some((p) => p.key === 'SUPABASE_URL' && p.level === 'error'));
   assert.ok(buildConfig(Object.assign({}, BASE, { SUPABASE_URL: '' })).problems.some((p) => p.key === 'SUPABASE_URL' && p.level === 'error'));
 });
+test('Google: read-only scope, GET-only Sheets reads, token refresh, missing tabs and access errors', async () => {
+  assert.strictEqual(SCOPE, 'https://www.googleapis.com/auth/spreadsheets.readonly');
+  const dir = tmpDir(), tokenFile = path.join(dir, 'google-token.json');
+  fs.writeFileSync(tokenFile, JSON.stringify({ refresh_token: '1//' + 'refreshTokenForTestsOnly_abcdefgh', access_token: 'ya29.' + 'old', expiry_date: NOW - 1000, scope: SCOPE }));
+  const calls = [];
+  const g = createGoogle({ clientId: 'c', clientSecret: FAKE_SECRET, tokenFile, now: () => NOW, redact: makeRedactor([FAKE_SECRET]),
+    fetch: async (url, init) => {
+      calls.push({ url, method: init.method, auth: init.headers.Authorization });
+      if (/oauth2/.test(url)) return fakeRes(200, { access_token: 'ya29.' + 'new', expires_in: 3600, scope: SCOPE });
+      if (/Groups/.test(decodeURIComponent(url))) return fakeRes(400, { error: { message: 'Unable to parse range: \'Groups\'' } });
+      if (/Config/.test(decodeURIComponent(url))) return fakeRes(403, { error: { message: 'denied' } });
+      return fakeRes(200, { values: FLIGHTS });
+    } });
+  assert.strictEqual((await g.readRange('sheet123', 'Flights')).rows.length, FLIGHTS.length);
+  assert.deepStrictEqual(await g.readRange('sheet123', 'Groups'), { missing: true });
+  await assert.rejects(g.readRange('sheet123', 'Config'), /HTTP 403 \(the authorised Google account cannot open this spreadsheet/);
+  const disabled = createGoogle({ clientId: 'c', clientSecret: FAKE_SECRET, tokenFile, now: () => NOW, redact: makeRedactor([]),
+    fetch: async () => fakeRes(403, { error: { code: 403, status: 'PERMISSION_DENIED', message: 'Google Sheets API has not been used in project 123 before or it is disabled.', details: [{ reason: 'SERVICE_DISABLED' }] } }) });
+  await assert.rejects(disabled.readRange('sheet123', 'Flights'), /Sheets API is not enabled in your Cloud project/);
+  const sheetCalls = calls.filter((c) => /sheets\.googleapis/.test(c.url));
+  assert.ok(sheetCalls.every((c) => c.method === 'GET' && /\/values\//.test(c.url) && c.auth === 'Bearer ya29.new'), JSON.stringify(sheetCalls));
+  assert.strictEqual(calls.filter((c) => /oauth2/.test(c.url)).length, 1, 'refreshed once, then reused');
+  assert.strictEqual(JSON.parse(fs.readFileSync(tokenFile, 'utf8')).access_token, 'ya29.new');
+  fs.writeFileSync(tokenFile, JSON.stringify({ refresh_token: 'r', scope: 'https://www.googleapis.com/auth/spreadsheets' }));
+  await assert.rejects(g.readRange('sheet123', 'Flights'), /not read-only/);
+});
 test('no write operation exists anywhere in the worker source', () => {
   const src = fs.readdirSync(SRC).map((f) => fs.readFileSync(path.join(SRC, f), 'utf8')).join('\n');
   ['setWebhook', 'deleteWebhook', 'setMyCommands', 'batchUpdate', ':append', ':clear', 'values:batchClear', "method: 'PUT'", "method: 'PATCH'",
     "method: 'DELETE'", 'auth/spreadsheets"', "auth/spreadsheets'", 'auth/drive', 'appendRow', 'setValues', 'child_process', 'eval(',
-    '.insert(', '.upsert(', '.update(', '.delete()', '.rpc(', '.storage'].forEach((w) =>
+    '.insert(', '.upsert(', '.update({', '.delete()', '.rpc(', '.storage'].forEach((w) =>
     assert.ok(!src.includes(w), 'found "' + w + '"'));
   const posts = src.match(/method: 'POST'/g) || [];
-  assert.strictEqual(posts.length, 2, 'POST only for Telegram calls and the model');
+  assert.strictEqual(posts.length, 3, 'POST only for Telegram calls, the model, and the (optional) Google OAuth token endpoint');
   assert.ok(src.match(/\.select\([^)]*\)/g).every((m) => m === ".select('*')"), 'Supabase: select only');
 });
 

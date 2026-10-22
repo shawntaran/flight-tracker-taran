@@ -11,6 +11,7 @@
     "preview": "node tools/preview-server.js",
     "push": "clasp push",
     "assistant": "node local-assistant/src/main.js start",
+    "assistant:auth": "node local-assistant/src/main.js auth",
     "assistant:health": "node local-assistant/src/main.js health",
     "test:assistant": "node local-assistant/test/assistant-tests.js"
   },

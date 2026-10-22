@@ -3,6 +3,7 @@
 // Faculty Flight Tracker: local Telegram assistant.
 //   node local-assistant/src/main.js           start polling (npm run assistant)
 //   node local-assistant/src/main.js health    check config, Telegram, Supabase and the model; sends no message
+//   node local-assistant/src/main.js auth      optional one-time read-only Google authorisation (kept alongside Supabase)
 
 const path = require('path');
 const { loadConfig, describe } = require('./config');
@@ -10,6 +11,7 @@ const { makeRedactor, makeLogger } = require('./redact');
 const { createTelegram } = require('./telegram');
 const { createOffsetStore } = require('./state');
 const { createSupabase } = require('./supabase');
+const { createGoogle } = require('./google');
 const { createLlm } = require('./llm');
 const { createWorker, createSnapshotSource } = require('./worker');
 
@@ -18,7 +20,7 @@ let redactAll = makeRedactor([]);
 async function main() {
   const cmd = process.argv[2] || 'start';
   const { config, problems, file, fileFound } = loadConfig();
-  const redact = redactAll = makeRedactor([config.tgToken, config.llm.apiKey, config.supabase.anonKey]);
+  const redact = redactAll = makeRedactor([config.tgToken, config.llm.apiKey, config.supabase.anonKey, config.google.clientSecret]);
   const log = makeLogger(redact);
   const print = (s) => console.log(redact(s));
   if (!fileFound) print('No config file at ' + file + '. Copy .env.local-assistant.example to .env.local-assistant and fill it in.');
@@ -26,6 +28,14 @@ async function main() {
 
   const supabase = createSupabase({ url: config.supabase.url, anonKey: config.supabase.anonKey, redact });
   const llm = createLlm(Object.assign({}, config.llm, { fetch, redact }));
+
+  if (cmd === 'auth') {
+    if (!config.google.clientId || !config.google.clientSecret) { print('Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET first.'); process.exitCode = 1; return; }
+    const tokenFile = path.join(config.stateDir, 'google-token.json');
+    await createGoogle({ clientId: config.google.clientId, clientSecret: config.google.clientSecret, tokenFile, fetch, redact }).authorize({ print });
+    print('Saved a read-only Google token to ' + tokenFile + ' (git-ignored). Tracker data is read from Supabase; this token is optional.');
+    return;
+  }
 
   const telegram = createTelegram({ token: config.tgToken, fetch, redact, timeoutMs: 15000 });
 
@@ -47,7 +57,7 @@ async function main() {
     return;
   }
 
-  if (cmd !== 'start') { print('Unknown command "' + cmd + '". Use: start | health'); process.exitCode = 1; return; }
+  if (cmd !== 'start') { print('Unknown command "' + cmd + '". Use: start | health | auth'); process.exitCode = 1; return; }
   if (problems.some((p) => p.level === 'error')) { print('Fix the configuration errors above, then start again.'); process.exitCode = 1; return; }
 
   const offsetStore = createOffsetStore(path.join(config.stateDir, 'telegram-offset.json'));

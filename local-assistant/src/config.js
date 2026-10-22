@@ -7,6 +7,7 @@ const path = require('path');
 
 const ENV_FILE = path.join(__dirname, '..', '.env.local-assistant');
 const KEYS = ['TG_BOT_TOKEN', 'ALLOWED_CHAT_IDS', 'SUPABASE_URL', 'SUPABASE_ANON_KEY',
+  'GOOGLE_SPREADSHEET_ID', 'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET',
   'LLM_BASE_URL', 'LLM_MODEL', 'LLM_API_KEY', 'LLM_TIMEOUT_MS', 'STATE_DIR', 'RATE_LIMIT_PER_MIN', 'MAX_QUESTION_CHARS',
   'PREVIEW_SOURCE'];
 const PLACEHOLDER_MODEL = 'your-model-name';
@@ -97,6 +98,10 @@ function buildConfig(raw) {
   const config = {
     tgToken: get('TG_BOT_TOKEN'), allowedChatIds: allowed,
     supabase: { url: supabaseUrl, anonKey: get('SUPABASE_ANON_KEY') },
+    // Optional, kept alongside Supabase for now: google.js and "npm run assistant:auth" still work with
+    // these, but no tracker data is read from Google Sheets any more.
+    spreadsheetId: get('GOOGLE_SPREADSHEET_ID'),
+    google: { clientId: get('GOOGLE_OAUTH_CLIENT_ID'), clientSecret: get('GOOGLE_OAUTH_CLIENT_SECRET') },
     llm,
     stateDir: get('STATE_DIR') || path.join(__dirname, '..', '.state'),
     rateLimitPerMin: intIn(get('RATE_LIMIT_PER_MIN'), 6, 1, 60),
@@ -143,7 +148,7 @@ function describe(config) {
   try { const u = new URL(config.llm.baseUrl); host = u.protocol + '//' + u.host; } catch (e) { /* invalid */ }
   return { modelEndpoint: host, model: config.llm.model || '(not set)', apiKey: config.llm.apiKey ? 'set' : 'not set',
     allowedChats: config.allowedChatIds.size, supabase: config.supabase.url ? hostOf(config.supabase.url) : 'not set',
-    supabaseKey: config.supabase.anonKey ? 'set' : 'not set',
+    supabaseKey: config.supabase.anonKey ? 'set' : 'not set', googleOAuth: config.google.clientId ? 'set (optional)' : 'not set (optional)',
     telegramToken: config.tgToken ? 'set' : 'not set', stateDir: config.stateDir };
 }
 
