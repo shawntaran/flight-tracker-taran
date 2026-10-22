@@ -70,11 +70,22 @@ function supabaseReason(e) {
 const isMissingTable = (e) => !!e && (e.code === 'PGRST205' || e.code === '42P01' || /Could not find the table|does not exist/i.test(e.message || ''));
 
 /**
+ * A table imported from a sheet tab keeps the tab's case ("Flights"), and Postgres names are
+ * case-sensitive. PostgREST's hint "Perhaps you meant the table 'public.Flights'" names it; only a
+ * name that differs from ours in letter case alone is taken.
+ */
+function sameNameOtherCase(e, table) {
+  const m = String((e && e.hint) || '').match(/Perhaps you meant the table '(?:[^'.]+\.)?([^'.]+)'/);
+  return m && m[1] !== table && m[1].toLowerCase() === table.toLowerCase() ? m[1] : null;
+}
+
+/**
  * opts: {url, anonKey, redact, client} (client: a ready Supabase client, for tests).
  * -> {readRange(tab)}: {rows} | {missing: true} | throws, the contract the Sheets reader had.
  */
 function createSupabase({ url, anonKey, redact, client }) {
   const r = redact || ((s) => String(s));
+  const actualName = {}; // our table name -> the case the project really uses, once a hint has told us
   let sb = client || null;
   const db = () => {
     if (sb) return sb;
@@ -84,11 +95,17 @@ function createSupabase({ url, anonKey, redact, client }) {
   };
 
   async function readRange(tab) {
-    const table = TABLES[tab] || String(tab).toLowerCase();
+    const wanted = TABLES[tab] || String(tab).toLowerCase();
+    let table = actualName[wanted] || wanted;
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
     try {
-      const { data, error } = await db().from(table).select('*').abortSignal(ctl.signal);
+      let { data, error } = await db().from(table).select('*').abortSignal(ctl.signal);
+      const other = isMissingTable(error) && sameNameOtherCase(error, table);
+      if (other) {
+        table = actualName[wanted] = other;
+        ({ data, error } = await db().from(table).select('*').abortSignal(ctl.signal));
+      }
       if (error) {
         if (isMissingTable(error)) return { missing: true };
         if (ctl.signal.aborted || /abort/i.test(error.message || '')) throw new Error('Supabase read of "' + table + '" timed out');

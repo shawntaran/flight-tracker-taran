@@ -389,6 +389,20 @@ test('Supabase: select-only reads, rows in the Sheets shape, missing tables, key
   assert.deepStrictEqual(calls, [['flights', '*'], ['groups', '*'], ['status', '*'], ['config', '*']]);
   assert.strictEqual(TABLES.Import, 'flights', 'the Import columns live in the flights table too');
 });
+test('Supabase: a table imported as "Flights" (tab case) is found through PostgREST\'s hint; other suggestions are not taken', async () => {
+  const calls = [];
+  const hinted = { from: (t) => ({ select: () => ({ abortSignal: async () => {
+    calls.push(t);
+    if (t === 'Flights') return { data: sbObjects(FLIGHTS, (h) => h), error: null };
+    const hint = t === 'flights' ? "Perhaps you meant the table 'public.Flights'" : "Perhaps you meant the table 'public.flight_groups'";
+    return { data: null, error: { code: 'PGRST205', message: "Could not find the table 'public." + t + "' in the schema cache", hint } };
+  } }) }) };
+  const sb = createSupabase({ client: hinted });
+  assert.strictEqual((await sb.readRange('Flights')).rows.length, FLIGHTS.filter((r) => Array.isArray(r) && r.length).length);
+  await sb.readRange('Import');
+  assert.deepStrictEqual(await sb.readRange('Groups'), { missing: true }, 'a different table is never read instead');
+  assert.deepStrictEqual(calls, ['flights', 'Flights', 'Flights', 'groups'], 'the real name is remembered after the first hint');
+});
 test('Supabase rows give the bot exactly the snapshot the Flights sheet gave (verbatim and snake_case columns)', async () => {
   for (const names of [(h) => h, snake]) {
     const raw = { flights: { rows: toRows(sbObjects(FLIGHTS, names), 'Flights') }, groups: { rows: toRows(sbObjects(GROUPS, names), 'Groups') },
