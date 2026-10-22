@@ -1,0 +1,4 @@
+#!/bin/sh
+# Refuses commits that would publish real keys in a .env*.example template (tools/check-env-examples.js).
+# Installed by "npm install" (package.json "prepare": git config core.hooksPath .githooks).
+exec node tools/check-env-examples.js
