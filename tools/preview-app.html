@@ -480,7 +480,7 @@
             <span class="flex items-center gap-1"><span class="w-3 border-t-2 border-dashed border-outline"></span>Planned route</span>
           </div>
           <div class="relative">
-            <div id="fl-map" class="h-64 sm:h-72 lg:h-80 w-full" role="region" aria-label="Map of monitored aircraft"></div>
+            <div id="fl-map" class="relative z-0 isolate h-64 sm:h-72 lg:h-80 w-full" role="region" aria-label="Map of monitored aircraft"></div>
             <div id="fl-map-empty" class="hidden absolute inset-0 z-[450] flex items-center justify-center p-4 pointer-events-none">
               <div class="px-3 py-2 rounded-lg bg-surface-container-lowest/95 shadow-sm text-center flex flex-col items-center gap-0.5">
                 <span class="material-symbols-outlined text-[22px] text-on-surface-variant">location_off</span>
@@ -682,7 +682,7 @@
       <div class="bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden">
         <div class="px-space-md py-3 border-b border-outline-variant/20 flex items-center justify-between">
           <div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[18px] text-primary">history</span><span class="font-label-md text-label-md font-semibold text-on-surface">Recent API Requests</span></div>
-          <span class="font-data-mono text-[11px] text-on-surface-variant/60">Mock Data</span>
+          <span id="au-rows-note" class="font-data-mono text-[11px] text-on-surface-variant/60"></span>
         </div>
         <div class="overflow-x-auto">
           <table class="w-full text-left border-collapse">
@@ -1924,28 +1924,36 @@
         '<div class="flex justify-between font-data-mono text-[10px] text-on-surface-variant"><span>Requests: ' + (u ? u.requests + '/' + u.requestLimit : '—') + '</span>' +
         '<span>Window: ' + (u ? u.window : '—') + '</span></div></div>' +
       '<div class="flex justify-between items-center text-[11px]"><span class="text-on-surface-variant">Enabled</span><span class="font-data-mono text-on-tertiary-container font-semibold">Yes</span></div>';
-    $('au-opensky-card').innerHTML =
-      '<div class="flex items-center justify-between"><div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[18px] text-primary">radar</span>' +
-      '<span class="font-label-md text-label-md font-semibold text-on-surface">OpenSky Network</span></div>' +
-      '<span class="font-data-mono text-[11px] font-semibold text-on-tertiary-container">Active</span></div>' +
-      '<div class="flex flex-col gap-1 p-2.5 rounded-lg bg-surface-container-low">' +
-        '<div class="flex justify-between font-label-sm text-label-sm"><span class="text-on-surface font-semibold">Type</span><span class="font-data-mono text-on-surface">ADS-B Live Positions</span></div>' +
-        '<div class="flex justify-between font-label-sm text-label-sm"><span class="text-on-surface font-semibold">Cost</span><span class="font-data-mono text-on-surface">Free / unlimited</span></div>' +
-        '<div class="flex justify-between font-label-sm text-label-sm"><span class="text-on-surface font-semibold">Auth</span><span class="font-data-mono text-on-surface">Anonymous or keyed</span></div></div>' +
-      '<div class="flex justify-between items-center text-[11px]"><span class="text-on-surface-variant">Enabled</span><span class="font-data-mono text-on-tertiary-container font-semibold">Yes</span></div>';
-    $('au-telegram-card').innerHTML =
-      '<div class="flex items-center justify-between"><div class="flex items-center gap-1.5"><span class="material-symbols-outlined text-[18px] text-primary">send</span>' +
-      '<span class="font-label-md text-label-md font-semibold text-on-surface">Telegram Dispatch</span></div>' +
-      '<span class="font-data-mono text-[11px] font-semibold text-on-tertiary-container">Active</span></div>' +
-      '<div class="flex flex-col gap-1 p-2.5 rounded-lg bg-surface-container-low">' +
-        '<div class="flex justify-between font-label-sm text-label-sm"><span class="text-on-surface font-semibold">Type</span><span class="font-data-mono text-on-surface">Bot notifications</span></div>' +
-        '<div class="flex justify-between font-label-sm text-label-sm"><span class="text-on-surface font-semibold">Cost</span><span class="font-data-mono text-on-surface">Free / unlimited</span></div>' +
-        '<div class="flex justify-between font-label-sm text-label-sm"><span class="text-on-surface font-semibold">Delivery</span><span class="font-data-mono text-on-surface">Coordinator alerts</span></div></div>' +
-      '<div class="flex justify-between items-center text-[11px]"><span class="text-on-surface-variant">Enabled</span><span class="font-data-mono text-on-tertiary-container font-semibold">Yes</span></div>';
+    var pv = d.providers || {}, os = pv.opensky, tg = pv.telegram;
+    function providerCard(icon, title, status, ok, rows) {
+      return '<div class="flex items-center justify-between gap-2"><div class="flex items-center gap-1.5 min-w-0"><span class="material-symbols-outlined text-[18px] text-primary">' + icon + '</span>' +
+        '<span class="font-label-md text-label-md font-semibold text-on-surface truncate">' + esc(title) + '</span></div>' +
+        '<span class="font-data-mono text-[11px] font-semibold text-right ' + (ok ? 'text-on-tertiary-container' : 'text-error') + '">' + esc(status) + '</span></div>' +
+        '<div class="flex flex-col gap-1 p-2.5 rounded-lg bg-surface-container-low">' + rows.map(function (r) {
+          return '<div class="flex justify-between gap-3 font-label-sm text-label-sm"><span class="text-on-surface font-semibold shrink-0">' + esc(r[0]) + '</span>' +
+            '<span class="font-data-mono text-right ' + (r[2] ? 'text-error' : 'text-on-surface') + '">' + esc(r[1]) + '</span></div>';
+        }).join('') + '</div>';
+    }
+    var osStatus = !os ? 'Not monitored' : os.fails >= 2 ? 'Failing (' + os.fails + ' in a row)' : os.fails === 1 ? 'Last call failed' : os.lastOkAt ? 'Active' : 'No calls yet';
+    $('au-opensky-card').innerHTML = providerCard('radar', 'OpenSky Network', osStatus, !!os && os.fails === 0, [
+      ['Type', 'ADS-B live positions'],
+      ['Auth', !os ? '—' : os.account ? 'Account (API client)' : 'Anonymous', !!os && !os.account],
+      ['Last success', os && os.lastOkAt ? hmd(os.lastOkAt, Date.now()) : '—'],
+      ['Last call', os && os.lastAt ? hmd(os.lastAt, Date.now()) + ' · ' + os.lastStatus : '—', !!os && !!os.lastStatus && os.lastStatus !== 'OK']
+    ]) + (os && os.fails >= 2 && !os.account ? '<p class="text-[11px] leading-snug text-error">OpenSky refuses most anonymous requests from servers. Add OPENSKY_CLIENT_ID and OPENSKY_CLIENT_SECRET to .env.engine.</p>' : '');
+    var tgOk = !!tg && !(tg.failed24h > 0) && !tg.lastProblem;
+    $('au-telegram-card').innerHTML = providerCard('send', 'Telegram Dispatch', !tg ? 'Not monitored' : !tgOk ? 'Problems' : tg.sent24h ? 'Active' : 'Idle', tgOk, [
+      ['Sent (24 h)', tg && tg.sent24h != null ? String(tg.sent24h) : '—'],
+      ['Failed (24 h)', tg && tg.failed24h != null ? String(tg.failed24h) : '—', !!tg && tg.failed24h > 0],
+      ['Waiting to retry', tg && tg.pending != null ? String(tg.pending) : '—'],
+      ['Last problem', tg && tg.lastProblem ? tg.lastProblem : 'none', !!tg && !!tg.lastProblem]
+    ]);
     // Request history table
     var reqs = d.apiRequests || [];
+    $('au-rows-note').textContent = d.preview ? 'Mock data' : reqs.length ? 'Last ' + reqs.length + ' requests (7 days)' : '';
     if (!reqs.length) {
-      $('au-rows').innerHTML = '<tr><td colspan="7" class="py-6 px-4 text-center text-on-surface-variant">No API requests recorded.</td></tr>';
+      $('au-rows').innerHTML = '<tr><td colspan="7" class="py-6 px-4 text-center text-on-surface-variant">' +
+        (d.preview ? 'No API requests recorded.' : 'No requests recorded yet. The tracker logs each call from its next run.') + '</td></tr>';
     } else {
       $('au-rows').innerHTML = reqs.slice().reverse().map(function (r, i) {
         var ok = r.status === 'OK';
@@ -1954,7 +1962,7 @@
           '<td class="py-2.5 px-3 whitespace-nowrap"><span class="font-label-sm text-label-sm font-semibold text-on-surface">' + esc(r.provider) + '</span></td>' +
           '<td class="py-2.5 px-3 whitespace-nowrap font-data-mono text-[11px] text-on-surface-variant">' + esc(r.endpoint) + '</td>' +
           '<td class="py-2.5 px-3 whitespace-nowrap font-data-mono text-[12px] text-secondary font-semibold">' + esc(r.flight || '—') + '</td>' +
-          '<td class="py-2.5 px-3 whitespace-nowrap font-data-mono text-[12px] text-on-surface">' + r.units + '</td>' +
+          '<td class="py-2.5 px-3 whitespace-nowrap font-data-mono text-[12px] text-on-surface">' + (r.units ? r.units : '—') + '</td>' +
           '<td class="py-2.5 px-3 whitespace-nowrap font-data-mono text-[12px] text-on-surface-variant">' + r.responseMs + 'ms</td>' +
           '<td class="py-2.5 px-3 whitespace-nowrap"><span class="inline-flex items-center gap-1 px-2 py-0.5 rounded font-label-sm text-[10px] font-semibold ' +
             (ok ? 'bg-tertiary-fixed text-on-tertiary-fixed-variant' : 'bg-error-container text-on-error-container') + '">' +

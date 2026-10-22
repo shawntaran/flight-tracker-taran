@@ -21,7 +21,7 @@ const ATTRIBUTION = 'Flight status data: AeroDataBox (https://aerodatabox.com)';
 const SOURCE_FLIGHTS = 'Supabase · flights table (tracked)';
 const SOURCE_IMPORT = 'Supabase · flights table, Import columns (schedule only)';
 const FALLBACK_NOTE = 'flights table empty or without the tracker\'s columns: showing Import-column schedules only, no live status';
-const USAGE_NOTE = 'Not available in the local preview (Apps Script only).';
+const USAGE_NOTE = 'API usage is not available on this server.';
 const FINAL = { ARR: { LANDED: 1, CANCELLED: 1, DIVERTED: 1 }, DEP: { DEPARTED: 1, CANCELLED: 1, DIVERTED: 1 } }; // = Tracker.FINAL
 
 const text = (v, max) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, max || 120);
@@ -69,6 +69,9 @@ function mapFlightsRows(rows, conf, redact) {
       final: !!FINAL[dir][status], flight: norm || raw, invalid: !norm, airport,
       terminal: text(g('Terminal (live)'), 8) || text(g('Terminal'), 8), gate: text(g('Gate'), 8), status,
       schedAt: arr ? parseTime(g('m:schedArr')) || parseTime(g('Sched Arr (IST)')) : parseTime(g('m:schedDep')) || parseTime(g('Sched Dep (IST)')),
+      // Departure of an arrival's flight, for the journey progress bar: scheduled, and the airline's revised time once airborne.
+      depSchedAt: parseTime(g('m:schedDep')) || parseTime(g('Sched Dep (IST)')),
+      depActualAt: status === 'DEPARTED' || status === 'LANDED' ? parseTime(g('m:revDep')) : null,
       etaAt: arr ? parseTime(g('m:eta')) : parseTime(g('m:revDep')),
       etaSource: text(g('ETA Source'), 80), groupId: text(g('Cab Group'), 40), pickupDisp: text(g('Pickup (IST)'), 30),
       lastCheckDisp: text(g('Last Check (IST)'), 30), lastError: redact(text(g('Last Error'), 300))
@@ -100,10 +103,15 @@ function readStatusRows(rows, redact) {
     error: redact(text(kv.LAST_TICK_ERROR, 200)), triggerInstalled: inst === 'yes' ? true : inst === 'no' ? false : null };
 }
 
-function payload(now, conf, source, flights, groups, errors, lastTick) {
+/** engine: tools/engine-status.js output (usage, usageError, apiRequests, log, providers) or null. */
+function payload(now, conf, source, flights, groups, errors, lastTick, engine) {
+  const e = engine || {};
+  // The scheduler that runs the tracker reports itself in the heartbeat; the page counts it as one trigger.
+  const tickTriggers = lastTick && lastTick.triggerInstalled === true ? 1 : lastTick && lastTick.triggerInstalled === false ? 0 : null;
   return {
     generatedAt: now, preview: false, source, homeAirport: conf.homeAirport, maxSeats: conf.maxSeats, attribution: ATTRIBUTION,
-    flights, groups, log: [], tickTriggers: null, usage: null, usageError: USAGE_NOTE, errors, assistant: { enabled: false }, lastTick
+    flights, groups, log: e.log || [], tickTriggers, usage: e.usage || null, usageError: e.usage ? '' : e.usageError || USAGE_NOTE,
+    apiRequests: e.apiRequests || [], providers: e.providers || {}, errors, assistant: { enabled: false }, lastTick
   };
 }
 
@@ -115,6 +123,7 @@ function payload(now, conf, source, flights, groups, errors, lastTick) {
 function createSheetSource(opts) {
   const o = opts || {};
   let readRange = o.readRange, previewSource = o.previewSource, redact = o.redact || ((s) => String(s));
+  let engineStatus = o.engineStatus || null; // tests inject it; otherwise built below with the engine's service key
   if (!readRange) {
     const { loadConfig } = require('../local-assistant/src/config');
     const { createSupabase } = require('../local-assistant/src/supabase');
@@ -123,6 +132,7 @@ function createSheetSource(opts) {
     redact = makeRedactor([config.supabase.anonKey, config.tgToken, config.llm.apiKey]);
     previewSource = config.previewSource;
     readRange = createSupabase({ url: config.supabase.url, anonKey: config.supabase.anonKey, redact }).readRange;
+    engineStatus = require('./engine-status').createEngineStatus();
   }
   const now = o.now || (() => Date.now());
   let cache = null, lastRead = -Infinity;
@@ -146,7 +156,11 @@ function createSheetSource(opts) {
     if (gr.error) errors.push('Groups: ' + gr.error);
     if (st.error) errors.push('Status: ' + st.error);
     const lastTick = st.rows ? readStatusRows(st.rows, redact) : null; // null: the page warns "no heartbeat"
-    return payload(t, conf, SOURCE_FLIGHTS, m.flights, gr.rows ? mapGroupsRows(gr.rows, m.flights) : [], errors, lastTick);
+    let engine = null;
+    if (engineStatus) {
+      try { engine = await engineStatus(cf.rows || []); } catch (e) { engine = { usageError: redact((e && e.message) || e) }; }
+    }
+    return payload(t, conf, SOURCE_FLIGHTS, m.flights, gr.rows ? mapGroupsRows(gr.rows, m.flights) : [], errors, lastTick, engine);
   }
 
   async function getDashboardData(req) {

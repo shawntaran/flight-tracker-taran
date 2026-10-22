@@ -38,6 +38,26 @@ function toRequest(url, o) {
   return { url, method: String(o.method || (o.payload != null ? 'post' : 'get')).toUpperCase(), headers, body };
 }
 
+const PROVIDERS = [['aerodatabox', 'AeroDataBox'], ['auth.opensky-network.org', 'OpenSky (login)'], ['opensky-network.org', 'OpenSky'],
+  ['flightaware.com', 'FlightAware'], ['api.telegram.org', 'Telegram']];
+
+/**
+ * Pure: a request URL -> {provider, endpoint, flight} for the API usage log. Never keeps the query string or
+ * the Telegram token (it is part of the path: /bot<token>/sendMessage).
+ */
+function describeRequest(url) {
+  let u;
+  try { u = new URL(url); } catch (e) { return { provider: 'unknown', endpoint: '', flight: '' }; }
+  const hit = PROVIDERS.find(([h]) => u.hostname.includes(h));
+  let path = u.pathname, flight = '';
+  if (/telegram/.test(u.hostname)) path = path.replace(/^\/bot[^/]+/, '');
+  const adb = path.match(/^(\/flights\/number)\/([A-Z0-9]{2,8})(\/|$)/i);
+  if (adb) { flight = adb[2].toUpperCase(); path = adb[1]; }
+  const fa = path.match(/^(\/aeroapi\/flights)\/([^/]+)/);
+  if (fa) { flight = decodeURIComponent(fa[2]).toUpperCase().slice(0, 10); path = fa[1]; }
+  return { provider: hit ? hit[1] : u.hostname, endpoint: path.slice(0, 60), flight };
+}
+
 /**
  * state: {get(k) -> string|null, set(k, v), del(k)} over tracker_state (run.js).
  * data: {flights: [row objects keyed by COLS k], groups: [[...GROUP_HEADERS values]], config: [[key, value]]}
@@ -49,7 +69,7 @@ function createCore(state, data, opts) {
   const secrets = o.secrets || {};
   const fetchSync = o.fetchSync || realFetchSync;
   const sleep = o.sleep || sleepSync;
-  const output = { flights: null, groups: null, heartbeat: null, log: [], usage: [], configIssues: [] };
+  const output = { flights: null, groups: null, heartbeat: null, log: [], usage: [], requests: [], configIssues: [] };
   const googleTouches = [];
   const print = o.log || ((line) => console.log(line));
 
@@ -62,7 +82,10 @@ function createCore(state, data, opts) {
   // ---- the five utility services, as Node implementations
   sandbox.UrlFetchApp = {
     fetch(url, options) {
+      const started = Date.now();
       const res = fetchSync(toRequest(url, options));
+      output.requests.push(Object.assign(describeRequest(url), { at: now(), responseMs: Date.now() - started, units: 0,
+        status: res.error ? (/timed out/i.test(res.error) ? 'TIMEOUT' : 'ERROR') : res.code >= 200 && res.code < 300 ? 'OK' : 'HTTP ' + res.code }));
       if (res.error) throw new Error('Request failed: ' + res.error); // never includes the URL (it may carry a token)
       if (res.code >= 400 && !(options && options.muteHttpExceptions)) throw new Error('Request failed with code ' + res.code);
       return { getResponseCode: () => res.code, getContentText: () => res.body, getHeaders: () => res.headers || {} };
@@ -141,6 +164,9 @@ function createCore(state, data, opts) {
   ctx.appendUsageRow_ = function (e) {
     const row = { at: e.at, label: e.label, params: e.params, code: e.code, units: e.units, requests: e.requests, outcome: e.outcome };
     output.usage.push(row);
+    // AeroDataBox logs its charge right after its request: put the units on that request's log entry.
+    const last = output.requests.slice().reverse().find((r) => r.provider === 'AeroDataBox');
+    if (last && !last.units && Number(e.units) > 0) last.units = Number(e.units);
     print('USAGE ' + JSON.stringify(row));
   };
   ctx.recordHeartbeat_ = function (nowMs, res, error) {
@@ -182,4 +208,4 @@ function createCore(state, data, opts) {
   };
 }
 
-module.exports = { createCore, toRequest, LOGIC_FILES, GOOGLE_SERVICES, ENGINE_VERSION };
+module.exports = { createCore, toRequest, describeRequest, LOGIC_FILES, GOOGLE_SERVICES, ENGINE_VERSION };

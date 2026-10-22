@@ -224,6 +224,42 @@ test('config: an imported text "null" is read as blank (the default), and report
   assert.strictEqual(http.calls.filter((c) => /aerodatabox/.test(c.url)).length, 1, 'lookups still allowed');
 });
 
+console.log('engine: API usage page data (request log, activity, provider health)');
+const { describeRequest } = require(path.join(ROOT, 'engine', 'core.js'));
+const { summarize } = require(path.join(ROOT, 'tools', 'engine-status.js'));
+test('every outgoing request is logged with provider, endpoint, flight, units and result; no token or query string', async () => {
+  const sb = fakeSupabase(tables());
+  await run(sb, fakeHttp());
+  const log = JSON.parse(sb.db.tracker_state.find((x) => x.key === 'REQUEST_LOG').value);
+  const pick = (p) => log.find((r) => r.provider === p);
+  assert.deepStrictEqual([pick('AeroDataBox').endpoint, pick('AeroDataBox').flight, pick('AeroDataBox').status], ['/flights/number', 'EK568', 'OK']);
+  assert.ok(pick('AeroDataBox').units >= 1, 'units charged on the AeroDataBox request');
+  assert.deepStrictEqual([pick('Telegram').endpoint, pick('Telegram').units], ['/sendMessage', 0]);
+  assert.ok(log.every((r) => typeof r.at === 'number' && typeof r.responseMs === 'number'));
+  const all = JSON.stringify(sb.db.tracker_state);
+  assert.ok(!all.includes(TG) && !all.includes(ADB) && !all.includes('withAircraftImage'), 'no token, key or query string stored');
+  assert.ok(JSON.parse(sb.db.tracker_state.find((x) => x.key === 'EVENT_LOG').value).some((e) => /AeroDataBox/.test(e.msg)), 'activity feed saved');
+});
+test('a failed call is logged as such; the logs keep only the newest entries', () => {
+  assert.deepStrictEqual(describeRequest('https://api.telegram.org/bot' + TG + '/getMe'), { provider: 'Telegram', endpoint: '/getMe', flight: '' });
+  const { appendLog } = require(path.join(ROOT, 'engine', 'run.js'));
+  const m = new Map(), st = { get: (k) => m.get(k) || null, set: (k, v) => m.set(k, v) };
+  appendLog(st, 'L', Array.from({ length: 250 }, (_, i) => ({ at: NOW, i })), 200, 1000, NOW);
+  appendLog(st, 'L', [{ at: NOW - 5000, old: true }], 200, 1000, NOW);
+  const l = JSON.parse(m.get('L'));
+  assert.deepStrictEqual([l.length, l[0].i, l.some((x) => x.old)], [200, 50, false]);
+});
+test('the dashboard reads the same budget the engine enforces, plus OpenSky and Telegram health', async () => {
+  const sb = fakeSupabase(tables());
+  await run(sb, fakeHttp((req) => (/opensky/.test(req.url) ? { code: 403, body: '' } : null)), { now: () => Date.parse('2026-10-24T21:00:00Z') });
+  const map = new Map(sb.db.tracker_state.map((x) => [x.key, x.value]));
+  map.set('prop:OPENSKY_FAILS', '3');
+  const s = summarize(map, CONFIG.map((x) => [x.Key, x.Value]), Date.now(), {}); // deliveries and usage are stamped with the real clock
+  assert.deepStrictEqual([s.usage.units >= 1, s.usage.unitLimit, s.usage.requests, s.usageError], [true, 400, 1, '']);
+  assert.deepStrictEqual([s.providers.opensky.fails, s.providers.opensky.account, s.providers.opensky.lastStatus], [3, false, 'HTTP 403']);
+  assert.ok(s.providers.telegram.sent24h >= 1 && s.apiRequests.length >= 2 && s.log.length >= 1, JSON.stringify(s.providers.telegram));
+});
+
 console.log('engine: the sandbox');
 test('every Google service is absent from the sandbox; touching one throws and is recorded', () => {
   const core = createCore({ get: () => null, set() {}, del() {} }, {}, { log: () => {} });

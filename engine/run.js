@@ -19,6 +19,17 @@ const { createStore } = require('./supabase-store');
 const { parseEnv } = require('../local-assistant/src/config');
 
 const SECRET_KEYS = ['ADB_KEY', 'TG_BOT_TOKEN', 'OPENSKY_CLIENT_ID', 'OPENSKY_CLIENT_SECRET', 'FA_KEY'];
+const REQUEST_LOG = 'REQUEST_LOG', EVENT_LOG = 'EVENT_LOG';
+const REQUEST_LOG_MAX = 200, EVENT_LOG_MAX = 200;
+
+/** Adds this run's entries to a JSON list in tracker_state, keeping the newest max and nothing older than maxAgeMs. */
+function appendLog(state, key, entries, max, maxAgeMs, nowMs) {
+  if (!entries || !entries.length) return;
+  let list;
+  try { list = JSON.parse(state.get(key) || '[]'); } catch (e) { list = []; }
+  if (!Array.isArray(list)) list = [];
+  state.set(key, JSON.stringify(list.concat(entries).filter((x) => x && nowMs - (x.at || 0) <= maxAgeMs).slice(-max)));
+}
 const ENV_FILE = path.join(__dirname, '..', '.env.engine');
 
 /** process.env wins over .env.engine. -> {supabaseUrl, serviceKey, secrets} */
@@ -78,6 +89,10 @@ async function runTracker(opts) {
       writes.flights = { wouldUpdate: (core.output.flights || []).length };
       return Object.assign({ ok: !res.error, dryRun: true, writes, notes, log: core.output.log, googleTouches: core.googleTouches }, res);
     }
+    // The dashboard's API Usage page and activity feed read these back (tools/engine-status.js).
+    const retentionMs = Math.min(Number(core.ctx.cfg().ADB_RETENTION_HOURS) || 0, 168) * 3600 * 1000;
+    appendLog(state, REQUEST_LOG, core.output.requests, REQUEST_LOG_MAX, 7 * 24 * 3600 * 1000, t0);
+    appendLog(state, EVENT_LOG, core.output.log, EVENT_LOG_MAX, retentionMs, t0); // lines can carry provider status text
     // Persist in the order that matters most: usage accounting first (money), then data, then heartbeat.
     writes.state = await store.saveState(state);
     let persistError = null;
@@ -121,4 +136,4 @@ if (require.main === module) {
   main(process.argv.slice(2)).catch((err) => { console.error('Fatal: ' + ((err && err.message) || err)); process.exitCode = 1; });
 }
 
-module.exports = { runTracker, readEnv, makeClient, SECRET_KEYS };
+module.exports = { runTracker, readEnv, makeClient, appendLog, SECRET_KEYS, REQUEST_LOG, EVENT_LOG };
