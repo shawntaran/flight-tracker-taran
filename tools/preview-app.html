@@ -1510,7 +1510,7 @@
 
   function renderFlightsPage() {
     var d = state.data, st = state.flights, ctx = flightsCtx();
-    var view = FS.buildView(activeLegFlights(), { filter: st.filter, query: st.query, sort: st.sort });
+    var view = FS.buildView(activeLegFlights(), { filter: st.filter, query: st.query, sort: st.sort, flightsFor: legFlightsFor });
     st.lastView = view;
     renderFilterTabs(view);
     $('fl-sort').value = view.sort;
@@ -1524,7 +1524,7 @@
       b.className = 'p-1.5 rounded-md transition-colors ' + (on ? 'bg-surface-container-lowest text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface');
     });
     var filterName = FILTER_META.filter(function (m) { return m[0] === view.filter; })[0][1];
-    $('fl-summary').textContent = 'Showing ' + view.shown + ' of ' + view.total + ' guests (current leg)' +
+    $('fl-summary').textContent = 'Showing ' + view.shown + ' of ' + view.total + ' guests (' + (view.filter === 'ALL' ? 'current leg' : 'the leg that matches') + ')' +
       (view.filter !== 'ALL' ? ' · ' + filterName : '') + (st.query ? ' · “' + st.query + '”' : '') + ' · ' + SORT_TEXT[view.sort];
     $('fl-cards').classList.toggle('hidden', st.view !== 'cards');
     $('fl-table').classList.toggle('hidden', st.view !== 'table');
@@ -1543,6 +1543,17 @@
   // One card per guest: the leg they are on now (tools/guest-view.js); the other leg is a muted line on the card.
   function activeLegFlights() {
     return state.guests.map(function (g) { return g.activeFlight; }).filter(Boolean);
+  }
+  /**
+   * One leg per guest for a filter: the current leg, or the guest's other leg when only that one matches. Once an
+   * arrival lands the current leg is the return flight, so without this Landed (or Cancelled) would lose the guest.
+   */
+  function legFlightsFor(filter) {
+    return state.guests.map(function (g) {
+      var a = g.activeFlight;
+      if (filter === 'ALL' || (a && FS.matchesFilter(a, filter))) return a;
+      return [g.arrival, g.departure].filter(function (o) { return o && o !== a && FS.matchesFilter(o, filter); })[0] || a;
+    }).filter(Boolean);
   }
   function otherLegStrip(f) {
     var g = state.guestOf && state.guestOf[f.id];

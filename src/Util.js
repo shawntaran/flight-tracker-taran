@@ -98,6 +98,7 @@ var AIRLINES = [
   ['QP', 'AKJ', 'Akasa Air', 'Akasa'], ['LX', 'SWR', 'Swiss', 'Swiss International Air Lines'],
   ['TK', 'THY', 'Turkish Airlines', 'Turkish'], ['CX', 'CPA', 'Cathay Pacific', 'Cathay'],
   ['MH', 'MAS', 'Malaysia Airlines'], ['TG', 'THA', 'Thai Airways', 'Thai'], ['QF', 'QFA', 'Qantas'],
+  ['VJ', 'VJC', 'VietJet Air', 'Vietjet'], ['VN', 'HVN', 'Vietnam Airlines'],
   ['AA', 'AAL', 'American Airlines', 'American'], ['UA', 'UAL', 'United Airlines', 'United'],
   ['DL', 'DAL', 'Delta Air Lines', 'Delta'], ['AC', 'ACA', 'Air Canada'], ['NH', 'ANA', 'All Nippon Airways', 'ANA'],
   ['JL', 'JAL', 'Japan Airlines'], ['KE', 'KAL', 'Korean Air'], ['VS', 'VIR', 'Virgin Atlantic'],

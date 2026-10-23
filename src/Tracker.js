@@ -121,6 +121,28 @@ function applyInfo(r, info, nowMs) {
   return notes;
 }
 
+/**
+ * Guests on the same flight (same flight number and direction, scheduled within 6 h of each other) are on one
+ * aircraft: a row without the aircraft's id or callsign takes them from another, so the live position reaches every
+ * guest; and an arrival another guest's row already has as LANDED is landed too (the aircraft may stop
+ * transmitting at the gate before this row is looked at again).
+ */
+function shareSameFlight_(rows) {
+  var when = function (r) { return r.dir === 'ARR' ? (r.schedArrAt || r.schedDepAt) : r.schedDepAt; };
+  rows.forEach(function (r) {
+    if (!r.active || r.flightNorm === 'INVALID' || !when(r)) return;
+    rows.forEach(function (o) {
+      if (o === r || !o.active || o.flightNorm !== r.flightNorm || o.dir !== r.dir || !when(o) || Math.abs(when(o) - when(r)) > 6 * HOUR) return;
+      if (!r.icao24 && o.icao24) r.icao24 = o.icao24;
+      if (!r.callsign && o.callsign) r.callsign = o.callsign;
+      if (r.dir === 'ARR' && o.status === 'LANDED' && !isFinal(r)) {
+        r.status = 'LANDED'; r.etaAt = o.etaAt; r.lastFixAt = o.lastFixAt; r.etaSource = o.etaSource;
+        if (o.liveTerminal && !r.liveTerminal) r.liveTerminal = o.liveTerminal;
+      }
+    });
+  });
+}
+
 /** Merges an OpenSky observation. live = liveEta(...) or null when not seen. */
 function applyLive(r, live, nowMs) {
   if (live && live.landed) {
@@ -225,6 +247,8 @@ function runTick_(now, opts) {
   rows.forEach(function (r) { purgeExpiredProviderData(r, now, C); });
   purgeOldLogs_(now, C);
 
+  shareSameFlight_(rows);
+
   // 1. OpenSky first (free): a live fix makes a pending AeroDataBox takeoff check unnecessary.
   var airborne = rows.filter(function (r) {
     return isTrackable(r) && r.dir === 'ARR' && AIRPORTS[r.airport] && r.status !== 'CANCELLED' &&
@@ -250,6 +274,7 @@ function runTick_(now, opts) {
       if (fails === 2) out.coord('⚠️ OpenSky failed twice (' + os.error + '). Live ETAs paused; using airline/scheduled times.');
       airborne.forEach(function (r) { applyLive(r, null, now); });
     }
+    shareSameFlight_(rows); // a landing seen for one guest reaches the others on that flight in the same run
   }
 
   // 2. Provider checks (AeroDataBox via the budgeted gateway, FlightAware as backup)

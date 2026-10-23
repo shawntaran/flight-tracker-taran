@@ -189,5 +189,18 @@ test('input list is not mutated and blanks are ignored', () => {
   assert.strictEqual(FS.buildView(list, {}).total, 2);
 });
 
+test('flightsFor: a guest whose arrival landed (current leg: the return flight) is still counted and shown under Landed', () => {
+  const arr = { id: 'A1', dir: 'ARR', flight: 'LH764', status: 'LANDED', final: true, etaAt: 1000 };
+  const dep = { id: 'D1', dir: 'DEP', flight: 'LH765', status: 'SCHEDULED', schedAt: 9000 };
+  const other = { id: 'A2', dir: 'ARR', flight: 'EK568', status: 'SCHEDULED', schedAt: 5000 };
+  const guests = [{ activeFlight: dep, arrival: arr, departure: dep }, { activeFlight: other, arrival: other }];
+  const flightsFor = (k) => guests.map((g) => (k === 'ALL' || FS.matchesFilter(g.activeFlight, k) ? g.activeFlight
+    : [g.arrival, g.departure].filter((o) => o && FS.matchesFilter(o, k))[0] || g.activeFlight));
+  const landed = FS.buildView([dep, other], { filter: 'LANDED', flightsFor });
+  assert.deepStrictEqual([landed.shown, landed.ordered.map((f) => f.id), landed.counts.LANDED, landed.counts.ALL], [1, ['A1'], 1, 2]);
+  assert.deepStrictEqual(FS.buildView([dep, other], { filter: 'ALL', flightsFor }).ordered.map((f) => f.id).sort(), ['A2', 'D1'], 'All: the current leg');
+  assert.strictEqual(FS.buildView([dep, other], { filter: 'LANDED' }).shown, 0, 'without flightsFor: unchanged behaviour');
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

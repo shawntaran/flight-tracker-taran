@@ -158,10 +158,14 @@
     var filter = FILTERS.indexOf(opts.filter) >= 0 ? opts.filter : 'ALL';
     var sort = SORTS.indexOf(opts.sort) >= 0 ? opts.sort : 'soonest';
     var all = (flights || []).filter(Boolean);
-    var searched = all.filter(function (f) { return matchesQuery(f, opts.query); });
+    // opts.flightsFor(filter): the list to filter, when it depends on the filter (one leg per guest: the leg that matches).
+    var searchedFor = function (k) {
+      var list = typeof opts.flightsFor === 'function' ? (opts.flightsFor(k) || []).filter(Boolean) : all;
+      return list.filter(function (f) { return matchesQuery(f, opts.query); });
+    };
     var counts = {};
-    FILTERS.forEach(function (k) { counts[k] = searched.filter(function (f) { return matchesFilter(f, k); }).length; });
-    var shown = searched.filter(function (f) { return matchesFilter(f, filter); });
+    FILTERS.forEach(function (k) { counts[k] = searchedFor(k).filter(function (f) { return matchesFilter(f, k); }).length; });
+    var shown = searchedFor(filter).filter(function (f) { return matchesFilter(f, filter); });
     var sections = SECTIONS.map(function (s) {
       return { key: s.key, title: s.title, flights: sortFlights(shown.filter(function (f) { return section(f) === s.key; }), sort, s.key) };
     }).filter(function (s) { return s.flights.length; });

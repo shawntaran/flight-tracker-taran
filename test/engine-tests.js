@@ -295,6 +295,21 @@ test('a run: the airborne guest gets a live ETA from adsb.lol, and the position 
   assert.deepStrictEqual([Object.keys(pos), pos.F1.lat, pos.F1.source, pos.F1.callsign], [['F1'], 15.9, 'adsb.lol', 'UAE568']);
   assert.ok(JSON.parse(sb.db.tracker_state.find((x) => x.key === 'REQUEST_LOG').value).some((x) => x.provider === 'adsb.lol' && x.status === 'OK'));
 });
+test('guests on one flight share it: a VJ flight number has a callsign, and a landing seen for one guest lands the other', async () => {
+  const vj = (o) => flightRow(Object.assign({ Direction: 'Arrival', Flight: 'VJ1801', 'Sched Arr (IST)': '2026-10-25 01:15', Terminal: 'T2',
+    'Flight (normalised)': 'VJ1801', 'm:schedArr': '2026-10-24T19:45:00.000Z', 'm:schedDep': '2026-10-24T15:40:00.000Z' }, o));
+  const seen = vj({ ID: 'V1', Name: 'Seen', Status: 'LANDED', 'm:alertedStatus': 'LANDED', 'm:callsign': 'VJC1801', 'm:icao24': '8881da',
+    'm:eta': '2026-10-24T19:29:00.000Z', 'm:lastFix': '2026-10-24T19:29:00.000Z', 'ETA Source': 'live (ADS-B, on ground)' });
+  const other = vj({ ID: 'V2', Name: 'Other', Status: 'SCHEDULED', 'm:alertedStatus': 'SCHEDULED', 'm:adbCalls': 4 }); // provider cap used up
+  const sb = fakeSupabase(tables({ Flights: [seen, other] })), http = adsbHttp([]); // the aircraft is no longer transmitting
+  const r = await run(sb, http);
+  assert.ok(r.ok, r.error);
+  const v2 = sb.db.Flights.find((x) => x.ID === 'V2');
+  assert.deepStrictEqual([v2.Status, v2['ETA Source'], v2['m:callsign'], v2['m:icao24'], v2['m:eta']],
+    ['LANDED', 'live (ADS-B, on ground)', 'VJC1801', '8881da', '2026-10-24T19:29:00.000Z']);
+  const sent = JSON.parse(sb.db.tracker_state.find((x) => x.key === 'EVENT_LOG').value).map((e) => e.msg || e.message || JSON.stringify(e)).join('\n');
+  assert.ok(/VJ1801 \(Other\) LANDED/.test(sent), 'the second guest gets the landing alert too:\n' + sent);
+});
 test('adsb.lol down: OpenSky is tried; both down: counted as a failed position check, the run itself still succeeds', async () => {
   const sb = fakeSupabase(tables()), http = adsbHttp(null, 503);
   assert.ok((await run(sb, http)).ok);
