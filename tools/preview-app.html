@@ -973,6 +973,8 @@
   }
 
   // ===== SHARED RENDERERS =====
+  /** The tracker lost this flight and marked it landed / departed after the time limit (src/Tracker.js assumeLanded_). */
+  function unconfirmed(f) { return /^assumed /i.test((f && f.etaSource) || ''); }
   function statusPill(f) {
     var s = f.status || 'SCHEDULED';
     var cls = s === 'DELAYED' || s === 'CANCELLED' || s === 'DIVERTED' ? ['bg-error-container text-on-error-container', 'bg-error' + (s === 'DELAYED' ? ' animate-pulse' : '')]
@@ -981,7 +983,7 @@
       : s === 'UNKNOWN' ? ['bg-surface-container text-on-surface-variant', 'bg-outline']
       : ['bg-surface-container text-on-surface-variant', ''];
     return '<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded ' + cls[0] + ' font-label-sm text-label-sm font-semibold">' +
-      (cls[1] ? '<span class="w-1.5 h-1.5 rounded-full ' + cls[1] + '"></span>' : '') + esc(s) + '</span>';
+      (cls[1] ? '<span class="w-1.5 h-1.5 rounded-full ' + cls[1] + '"></span>' : '') + esc(s) + (unconfirmed(f) ? ' (! NOT CONFIRMED)' : '') + '</span>';
   }
   function estimateCell(f) {
     if (FS.validEtaMs(f) == null) return '<span class="text-on-surface-variant" title="No usable estimate">--:--</span>';
@@ -1252,16 +1254,20 @@
     if (FS.isAirborne(f)) return 'air';
     return 'idle';
   }
-  function statusLabel(f) {
+  /** noTag: leave out "(! not confirmed)" (the caller shows it separately). */
+  function statusLabel(f, noTag) {
     var s = f.status || 'SCHEDULED';
     var base = s === 'DEPARTED' ? (f.dir === 'ARR' ? 'Airborne' : 'Departed') : s.charAt(0) + s.slice(1).toLowerCase();
     if (s === 'DELAYED' && FS.isAirborne(f)) base = 'Delayed · airborne';
+    if (unconfirmed(f) && !noTag) base += ' (! not confirmed)';
     return f.active === false ? 'Inactive · ' + base : base;
   }
   function flightPill(f) {
     var tn = tone(f), c = TONE[tn];
-    return '<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded ' + c.chip + ' font-label-sm text-label-sm uppercase font-bold tracking-wider whitespace-nowrap">' +
-      '<span class="w-1.5 h-1.5 rounded-full ' + c.bg + (tn === 'air' ? ' animate-pulse' : '') + '"></span>' + esc(statusLabel(f)) + '</span>';
+    // The "not confirmed" tag goes on a second line inside the pill, so the pill stays as narrow as the others.
+    return '<span class="inline-flex flex-col items-end px-2 py-0.5 rounded ' + c.chip + ' font-label-sm text-label-sm uppercase font-bold tracking-wider whitespace-nowrap">' +
+      '<span class="inline-flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full ' + c.bg + (tn === 'air' ? ' animate-pulse' : '') + '"></span>' +
+      esc(statusLabel(f, true)) + '</span>' + (unconfirmed(f) ? '<span class="text-[10px] leading-3 text-error">! Not confirmed</span>' : '') + '</span>';
   }
   function ends(f, home) {
     var arr = f.dir === 'ARR';

@@ -144,18 +144,25 @@ function shareSameFlight_(rows) {
 }
 
 /**
- * An arrival still DEPARTED ASSUME_LANDED_AFTER_H after its ETA, with no live position in that time, is landed: no
- * flight is still in the air that long after it was due, and without this a landing nobody confirmed (provider
- * lookups used up, no ADS-B coverage) stays "in the air" for good. The ETA Source says it is not confirmed.
+ * A flight the tracker lost track of (provider lookups used up, no ADS-B coverage) is finished ASSUME_LANDED_AFTER_H
+ * after it was due: an arrival not yet LANDED (and not cancelled or diverted) is landed, a departure not yet DEPARTED
+ * has departed. Without this it stays "in the air" or "scheduled" for good. A live position in that time keeps the
+ * row as it is. The ETA Source starts with "assumed", so the dashboard and alerts say it is not confirmed.
  */
+var LOST_ARR = { DEPARTED: 1, SCHEDULED: 1, DELAYED: 1, UNKNOWN: 1 }, LOST_DEP = { SCHEDULED: 1, DELAYED: 1, UNKNOWN: 1 };
 function assumeLanded_(r, nowMs, C) {
   var hours = Number(C.ASSUME_LANDED_AFTER_H);
-  if (!(hours > 0) || !r.active || r.dir !== 'ARR' || r.status !== 'DEPARTED') return;
-  var due = r.etaAt || r.adbEtaAt || r.schedArrAt;
+  if (!(hours > 0) || !r.active || r.flightNorm === 'INVALID' || !(r.dir === 'ARR' ? LOST_ARR : LOST_DEP)[r.status]) return;
+  var due = r.dir === 'ARR' ? r.etaAt || r.adbEtaAt || r.schedArrAt : r.revDepAt || r.schedDepAt;
   if (!due || nowMs - due < hours * HOUR || (r.lastFixAt && nowMs - r.lastFixAt < hours * HOUR)) return;
-  r.status = 'LANDED';
-  r.etaAt = due;
-  r.etaSource = 'assumed landed — not confirmed (no update ' + hours + ' h after ETA)';
+  if (r.dir === 'ARR') {
+    r.status = 'LANDED';
+    r.etaAt = due;
+    r.etaSource = 'assumed landed — not confirmed (no update ' + hours + ' h after ETA)';
+  } else {
+    r.status = 'DEPARTED';
+    r.etaSource = 'assumed departed — not confirmed (no update ' + hours + ' h after departure time)';
+  }
 }
 
 /** Merges an OpenSky observation. live = liveEta(...) or null when not seen. */
@@ -204,6 +211,9 @@ function describeChange(r, shift) {
   if (r.dir === 'DEP') {
     var dep = r.revDepAt || r.schedDepAt;
     if (r.status === 'CANCELLED') return '❌ ' + who + ' departure CANCELLED — rebooking needed; cab cancelled.';
+    if (r.status === 'DEPARTED' && /^assumed/.test(r.etaSource || '')) {
+      return 'ℹ️ ' + who + ' marked DEPARTED from ' + r.airport + ', not confirmed: no update since ' + fmtIST(dep) + ' IST.';
+    }
     if (r.status === 'DEPARTED') return '🛫 ' + who + ' has departed ' + r.airport + '.';
     return '🕒 ' + who + ' departure from ' + r.airport + ' now ' + fmtIST(dep) + ' IST' + shiftTxt + '.';
   }

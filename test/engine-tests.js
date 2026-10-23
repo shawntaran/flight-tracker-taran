@@ -318,15 +318,23 @@ test('an arrival still "in the air" 6 h after its ETA with no live position is m
   const stuck = lh('S1', '2026-10-24T13:00:00.000Z');                                    // 7 h past its ETA
   const recent = lh('S2', '2026-10-24T15:00:00.000Z', { 'Sched Arr (IST)': '2026-10-24 20:30', 'm:schedArr': '2026-10-24T15:00:00.000Z' }); // 5 h
   const seen = lh('S3', '2026-10-24T13:00:00.000Z', { 'm:lastFix': '2026-10-24T18:00:00.000Z', Flight: 'LH766', 'Flight (normalised)': 'LH766' }); // fix 2 h ago
-  const sb = fakeSupabase(tables({ Flights: [stuck, recent, seen] })), http = adsbHttp([]);
+  const neverSeen = lh('S4', null, { Status: 'SCHEDULED', 'm:alertedStatus': 'SCHEDULED', Flight: 'LH768', 'Flight (normalised)': 'LH768', 'ETA Source': null });
+  const dep = flightRow({ ID: 'D9', Name: 'Guest D9', Direction: 'Departure', Flight: 'LH765', 'Flight (normalised)': 'LH765', 'Sched Dep (IST)': '2026-10-24 18:30',
+    'm:schedDep': '2026-10-24T13:00:00.000Z', Status: 'SCHEDULED', 'm:alertedStatus': 'SCHEDULED', 'm:adbCalls': 4, 'm:callsign': 'DLH765' });
+  const cancelled = lh('S5', '2026-10-24T13:00:00.000Z', { Status: 'CANCELLED', 'm:alertedStatus': 'CANCELLED', Flight: 'LH770', 'Flight (normalised)': 'LH770' });
+  const sb = fakeSupabase(tables({ Flights: [stuck, recent, seen, neverSeen, dep, cancelled] })), http = adsbHttp([]);
   const r = await run(sb, http);
   assert.ok(r.ok, r.error);
   const row = (id) => sb.db.Flights.find((x) => x.ID === id);
   assert.deepStrictEqual([row('S1').Status, row('S1')['ETA Source'], row('S1')['m:eta']],
     ['LANDED', 'assumed landed — not confirmed (no update 6 h after ETA)', '2026-10-24T13:00:00.000Z']);
-  assert.deepStrictEqual([row('S2').Status, row('S3').Status], ['DEPARTED', 'DEPARTED'], 'under 6 h, or a live position since: left alone');
+  assert.deepStrictEqual([row('S2').Status, row('S3').Status, row('S5').Status], ['DEPARTED', 'DEPARTED', 'CANCELLED'],
+    'under 6 h, a live position since, or cancelled: left alone');
+  assert.deepStrictEqual([row('S4').Status, /^assumed landed/.test(row('S4')['ETA Source'])], ['LANDED', true], 'never confirmed as departed either');
+  assert.deepStrictEqual([row('D9').Status, row('D9')['ETA Source']], ['DEPARTED', 'assumed departed — not confirmed (no update 6 h after departure time)']);
   const sent = JSON.parse(sb.db.tracker_state.find((x) => x.key === 'EVENT_LOG').value).map((e) => e.msg || e.message || JSON.stringify(e)).join('\n');
   assert.ok(/LH764 \(Guest S1\) marked LANDED, not confirmed/.test(sent) && !/LH764 \(Guest S1\) LANDED at/.test(sent), sent);
+  assert.ok(/LH765 \(Guest D9\) marked DEPARTED from BLR, not confirmed/.test(sent), sent);
 });
 test('adsb.lol down: OpenSky is tried; both down: counted as a failed position check, the run itself still succeeds', async () => {
   const sb = fakeSupabase(tables()), http = adsbHttp(null, 503);
