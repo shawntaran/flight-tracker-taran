@@ -107,7 +107,6 @@ async function runTracker(opts) {
     const retentionMs = Math.min(Number(core.ctx.cfg().ADB_RETENTION_HOURS) || 0, 168) * 3600 * 1000;
     appendLog(state, REQUEST_LOG, core.output.requests, REQUEST_LOG_MAX, 7 * 24 * 3600 * 1000, t0);
     appendLog(state, EVENT_LOG, core.output.log, EVENT_LOG_MAX, retentionMs, t0); // lines can carry provider status text
-    savePositions(state, core.output.positions, flights.rows.map((r) => r.id), t0);
     // Persist in the order that matters most: usage accounting first (money), then data, then heartbeat.
     writes.state = await store.saveState(state);
     let persistError = null;
@@ -115,6 +114,11 @@ async function runTracker(opts) {
       if (core.output.flights) writes.flights = await store.saveFlights(core, flights, core.output.flights);
       writes.groups = await store.saveGroups(core, groups, core.output.groups);
     } catch (e) { persistError = (e && e.message) || String(e); }
+    // Positions after the flight rows: a dashboard read in between would otherwise show this run's position
+    // ("on ground") next to the last run's status ("airborne"). Only the changed key is written.
+    savePositions(state, core.output.positions, flights.rows.map((r) => r.id), t0);
+    const posWrite = await store.saveState(state);
+    writes.state = { saved: writes.state.saved + posWrite.saved, removed: writes.state.removed + posWrite.removed };
     let hb = core.output.heartbeat;
     if (persistError) hb = core.ctx.heartbeatRows_(t0, null, 'saving to Supabase failed: ' + persistError, trigger);
     if (hb && trigger == null) { // a manual run keeps whatever the scheduler last reported

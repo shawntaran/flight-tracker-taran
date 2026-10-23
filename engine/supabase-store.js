@@ -199,7 +199,8 @@ function createStore(client) {
       get: (k) => (map.has(k) ? map.get(k) : null),
       set: (k, v) => { map.set(k, String(v)); dirty.add(k); removed.delete(k); },
       del: (k) => { if (map.delete(k)) { removed.add(k); dirty.delete(k); } },
-      changes: () => ({ upsert: [...dirty].map((k) => ({ key: k, value: map.get(k), updated_at: new Date().toISOString() })), remove: [...removed] })
+      changes: () => ({ upsert: [...dirty].map((k) => ({ key: k, value: map.get(k), updated_at: new Date().toISOString() })), remove: [...removed] }),
+      saved: () => { dirty.clear(); removed.clear(); } // after a successful saveState: the next one writes only new changes
     };
   }
 
@@ -213,6 +214,7 @@ function createStore(client) {
       const { error } = await onTable('state', (n) => client.from(n).delete().in('key', ch.remove));
       if (error) throw fail('Cleaning tracker_state', error);
     }
+    if (typeof view.saved === 'function') view.saved();
     return { saved: ch.upsert.length, removed: ch.remove.length };
   }
 

@@ -272,15 +272,27 @@ test('an adsb.lol aircraft becomes an OpenSky-style state vector (metres, m/s, s
   assert.strictEqual(POS.toStateVector({ hex: 'x', flight: 'NOPOS' }, NOW), null, 'no position, no state');
   assert.deepStrictEqual(POS.toTelemetry(s, 'adsb.lol'), { lat: 15.9, lon: 77.7, onGround: false, altFt: 35000, gsKts: 450, headingDeg: 181, vsFpm: -60, squawk: '2214', fixAt: NOW - 2000, callsign: 'UAE568', source: 'adsb.lol' });
 });
-test('lookups: one request by transponder id, one by callsign only for flights without one; nothing when nothing is airborne', () => {
+test('lookups: one request by transponder id, one by callsign for every flight; nothing when nothing is airborne', () => {
   const urls = [];
   const lookup = POS.createAdsbLol((u) => { urls.push(u); return { ok: true, json: { now: NOW, ac: [] } }; });
   lookup(['3c6712', '', 'BAD!'], ['DLH764', 'UAE568', 'QTR572']);
-  assert.deepStrictEqual(urls, ['https://api.adsb.lol/v2/icao/3c6712', 'https://api.adsb.lol/v2/callsign/UAE568,QTR572']);
+  assert.deepStrictEqual(urls, ['https://api.adsb.lol/v2/icao/3c6712', 'https://api.adsb.lol/v2/callsign/DLH764,UAE568,QTR572']);
   urls.length = 0;
   assert.deepStrictEqual(lookup([], []), { ok: true, states: [], source: 'adsb.lol' });
   assert.strictEqual(urls.length, 0);
   assert.ok(!POS.createAdsbLol(() => ({ ok: false, error: 'HTTP 503' }))(['3c6712'], ['']).ok);
+});
+test('aircraft swap: the planned aircraft flying another callsign loses to the aircraft broadcasting this flight\'s callsign', () => {
+  const find = core0.ctx.findState;
+  const planned = POS.toStateVector(Object.assign({}, ADSB_AC, { hex: '896123', flight: 'UAE512  ', lat: 25 }), NOW); // now flying another flight
+  const swapped = POS.toStateVector(Object.assign({}, ADSB_AC, { hex: '896999', flight: 'UAE568  ', lat: 15.9 }), NOW);
+  assert.strictEqual(find([planned, swapped], '896123', 'UAE568'), swapped);
+  const same = POS.toStateVector(ADSB_AC, NOW); // id and callsign agree
+  assert.strictEqual(find([same], '896123', 'UAE568'), same);
+  const blank = POS.toStateVector(Object.assign({}, ADSB_AC, { flight: '' }), NOW); // no callsign broadcast: the id still counts
+  assert.strictEqual(find([blank, swapped], '896123', 'UAE568'), blank);
+  assert.strictEqual(find([swapped], '', 'UAE568'), swapped);
+  assert.strictEqual(find([planned], '896123', 'UAE568'), planned, 'no callsign match: the id match is all there is');
 });
 test('a run: the airborne guest gets a live ETA from adsb.lol, and the position is saved for the map', async () => {
   const sb = fakeSupabase(tables()), http = adsbHttp([ADSB_AC]);
@@ -293,6 +305,11 @@ test('a run: the airborne guest gets a live ETA from adsb.lol, and the position 
   assert.deepStrictEqual([f1.Status, /^live \(ADS-B, \d+ km out\)$/.test(f1['ETA Source'])], ['DEPARTED', true], f1['ETA Source']);
   const pos = JSON.parse(sb.db.tracker_state.find((x) => x.key === 'POSITIONS').value);
   assert.deepStrictEqual([Object.keys(pos), pos.F1.lat, pos.F1.source, pos.F1.callsign], [['F1'], 15.9, 'adsb.lol', 'UAE568']);
+  // Write order: the flight rows before the positions, and the positions in a write of their own.
+  const posAt = sb.calls.findIndex((c) => c.table === 'tracker_state' && c.op === 'upsert' && c.payload.some((x) => x.key === 'POSITIONS'));
+  const lastFlightAt = sb.calls.map((c) => c.table === 'Flights' && c.op === 'update').lastIndexOf(true);
+  assert.ok(lastFlightAt >= 0 && posAt > lastFlightAt, 'positions saved after the flight rows');
+  assert.deepStrictEqual(sb.calls[posAt].payload.map((x) => x.key), ['POSITIONS'], 'the second state write has only the positions');
   assert.ok(JSON.parse(sb.db.tracker_state.find((x) => x.key === 'REQUEST_LOG').value).some((x) => x.provider === 'adsb.lol' && x.status === 'OK'));
 });
 test('guests on one flight share it: a VJ flight number has a callsign, and a landing seen for one guest lands the other', async () => {

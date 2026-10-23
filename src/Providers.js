@@ -282,13 +282,16 @@ function openskyStates(icao24s) {
 
 /** State vector index: 0 icao24, 1 callsign, 3 time_position, 4 last_contact, 5 lon, 6 lat, 8 on_ground, 9 velocity m/s */
 function findState(states, icao24, callsign) {
-  var i, s;
-  if (icao24) for (i = 0; i < states.length; i++) if (Array.isArray(states[i]) && states[i][0] === icao24) return states[i];
+  var i, s, byId = null, byCall = null;
+  if (icao24) for (i = 0; i < states.length; i++) if (Array.isArray(states[i]) && states[i][0] === icao24) { byId = states[i]; break; }
   if (callsign) for (i = 0; i < states.length; i++) {
     s = states[i];
-    if (Array.isArray(s) && s[1] && String(s[1]).trim().toUpperCase() === callsign) return s;
+    if (Array.isArray(s) && s[1] && String(s[1]).trim().toUpperCase() === callsign) { byCall = s; break; }
   }
-  return null;
+  // After an aircraft swap the planned aircraft (icao24) flies another flight under another callsign: the callsign wins.
+  var idCall = byId && byId[1] ? String(byId[1]).trim().toUpperCase() : '';
+  if (byId && byCall && byCall !== byId && idCall && idCall !== callsign) return byCall;
+  return byId || byCall;
 }
 
 function isNum_(x) { return typeof x === 'number' && isFinite(x); }

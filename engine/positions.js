@@ -41,9 +41,9 @@ function toTelemetry(s, source) {
 function createAdsbLol(fetchJson) {
   return function states(icao24s, callsigns) {
     const hexes = [...new Set((icao24s || []).map((h) => String(h || '').trim().toLowerCase()).filter((h) => HEX_RE.test(h)))].slice(0, MAX_PER_REQUEST);
-    // A callsign is only needed for a flight whose transponder id is unknown.
-    const calls = [...new Set((callsigns || []).filter((c, i) => !HEX_RE.test(String((icao24s || [])[i] || '').trim()))
-      .map((c) => String(c || '').trim().toUpperCase()).filter((c) => CALLSIGN_RE.test(c)))].slice(0, MAX_PER_REQUEST);
+    // Every flight is also looked up by callsign: the transponder id comes from the provider's planned aircraft, and
+    // after a last-minute aircraft swap only the callsign finds the flight (findState tries the id first).
+    const calls = [...new Set((callsigns || []).map((c) => String(c || '').trim().toUpperCase()).filter((c) => CALLSIGN_RE.test(c)))].slice(0, MAX_PER_REQUEST);
     if (!hexes.length && !calls.length) return { ok: true, states: [], source: 'adsb.lol' };
     const out = [], errors = [];
     [[hexes, '/icao/'], [calls, '/callsign/']].forEach(([list, path]) => {

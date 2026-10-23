@@ -847,6 +847,7 @@
   var FS = window.FlightSort; // shared time/sort rules (tools/flight-sort.js)
   var GV = window.GuestView;   // one entry per guest, active-leg rules (tools/guest-view.js)
   var legFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+  var dayFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short' });
   var delayOf = function (f) { return FS.delayMin(f); };
 
   // ===== STATE =====
@@ -1589,8 +1590,33 @@
       return '<section class="flex flex-col gap-space-xs" data-section="' + s.key + '" aria-label="' + title + '">' +
         '<div class="flex items-center justify-between px-1 pt-1"><h2 class="font-label-sm text-label-sm uppercase tracking-wider font-bold text-on-surface-variant">' + title +
         ' <span class="font-data-mono">(' + s.flights.length + ')</span></h2><span class="font-data-mono text-[11px] text-on-surface-variant/80">' + how + '</span></div>' +
-        s.flights.map(function (f) { return cardHtml(f, ctx); }).join('') + '</section>';
+        cardsByDay(s.flights, ctx, view.sort !== 'flight') + '</section>';
     }).join('');
+  }
+
+  /**
+   * Cards under a heading per IST date of the leg (arrival date for arrivals, departure date for departures), in the
+   * section's order. Sorted by flight number the dates would repeat, so there are no headings then.
+   */
+  function cardsByDay(list, ctx, byDay) {
+    if (!byDay) return list.map(function (f) { return cardHtml(f, ctx); }).join('');
+    var dayOf = function (f) { var ms = FS.bestTime(f).ms; return ms == null ? null : FS.istDayOffset(ms, ctx.now); };
+    var count = {};
+    list.forEach(function (f) { var k = String(dayOf(f)); count[k] = (count[k] || 0) + 1; });
+    var last, html = '';
+    list.forEach(function (f, i) {
+      var off = dayOf(f), k = String(off);
+      if (i === 0 || k !== last) {
+        var ms = FS.bestTime(f).ms;
+        var name = off == null ? 'Date unknown' : (off === 0 ? 'Today · ' : off === 1 ? 'Tomorrow · ' : off === -1 ? 'Yesterday · ' : '') + dayFmt.format(ms);
+        html += '<div class="flex items-center gap-2 px-1 pt-2" data-day="' + esc(k) + '"><span class="font-label-sm text-label-sm font-bold ' +
+          (off === 0 ? 'text-secondary' : 'text-on-surface') + '">' + esc(name) + '</span><span class="font-data-mono text-[11px] text-on-surface-variant">' +
+          count[k] + (count[k] === 1 ? ' flight' : ' flights') + '</span><span class="flex-1 h-px bg-outline-variant/40"></span></div>';
+        last = k;
+      }
+      html += cardHtml(f, ctx);
+    });
+    return html;
   }
 
   function renderFlightTable(view, ctx) {
