@@ -173,7 +173,9 @@ test('the preview server passes ?fresh=1 through and the bridge sends it only fo
   assert.ok(/getSheetData\(url\.searchParams\.get\('fresh'\) === '1'\)/.test(server));
   assert.ok(/opts && opts\.fresh \? '\?fresh=1' : ''/.test(bridge));
   assert.ok(/\[data-refresh\]'\)\.forEach\(function \(b\) \{ b\.addEventListener\('click', function \(\) \{ load\(true\); \}\); \}\)/.test(page));
-  assert.ok(/setInterval\(function \(\) \{ if \(!document\.hidden\) load\(\); \}, REFRESH_MS\)/.test(page), 'auto-refresh keeps the cache');
+  assert.ok(/function autoLoad\(\) \{ lastAutoLoad = Date\.now\(\); load\(\); \}/.test(page) &&
+    /setInterval\(function \(\) \{ if \(!document\.hidden\) autoLoad\(\); \}, REFRESH_MS\)/.test(page) &&
+    /visibilitychange[^\n]*autoLoad\(\)/.test(page), 'auto-refresh (timer and returning to the tab) keeps the cache');
 });
 
 console.log('Supabase (local-assistant/src/supabase.js -> the same payload)');

@@ -2697,7 +2697,12 @@
     $('hb-banner').classList.toggle('hidden', !v.warn);
   }
   setInterval(tickAgo, 30000);
-  setInterval(function () { if (!document.hidden) load(); }, REFRESH_MS);
+  // A background tab skips the refresh; coming back to it reloads at once if the data is over a minute old, so the page
+  // never shows an old "Tracker last ran" (and a false "has not run" banner) while the tracker is running fine.
+  var lastAutoLoad = Date.now();
+  function autoLoad() { lastAutoLoad = Date.now(); load(); }
+  setInterval(function () { if (!document.hidden) autoLoad(); }, REFRESH_MS);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && Date.now() - lastAutoLoad > 60 * 1000) autoLoad(); });
 
   // ===== INIT =====
   navigate(location.hash.slice(1) || 'overview');
