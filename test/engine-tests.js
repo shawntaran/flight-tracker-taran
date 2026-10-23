@@ -287,6 +287,8 @@ test('a run: the airborne guest gets a live ETA from adsb.lol, and the position 
   const r = await run(sb, http);
   assert.ok(r.ok, r.error);
   assert.ok(http.calls.some((c) => c.url === 'https://api.adsb.lol/v2/callsign/UAE568'), http.calls.map((c) => c.url).join('\n'));
+  // adsb.lol refuses Node's default User-Agent ("node") with 403: every call names the project.
+  assert.ok(http.calls.filter((c) => /adsb\.lol/.test(c.url)).every((c) => /^flight-tracker\/.+github\.com/.test((c.headers || {})['User-Agent'])));
   const f1 = sb.db.Flights.find((x) => x.ID === 'F1');
   assert.deepStrictEqual([f1.Status, /^live \(ADS-B, \d+ km out\)$/.test(f1['ETA Source'])], ['DEPARTED', true], f1['ETA Source']);
   const pos = JSON.parse(sb.db.tracker_state.find((x) => x.key === 'POSITIONS').value);

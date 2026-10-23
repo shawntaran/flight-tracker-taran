@@ -14,7 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { fetchSync: realFetchSync, sleepSync } = require('./sync-fetch');
-const { createAdsbLol, toTelemetry } = require('./positions');
+const { createAdsbLol, toTelemetry, USER_AGENT } = require('./positions');
 
 const SRC = path.join(__dirname, '..', 'src');
 const LOGIC_FILES = ['Util.js', 'Config.js', 'Sheet.js', 'Providers.js', 'AdbClient.js', 'Grouping.js', 'Alerts.js', 'Tracker.js'];
@@ -146,7 +146,7 @@ function createCore(state, data, opts) {
   let lastStates = [], lastSource = '';
   const fetchJson = (url) => {
     try {
-      const res = sandbox.UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+      const res = sandbox.UrlFetchApp.fetch(url, { muteHttpExceptions: true, headers: { 'User-Agent': USER_AGENT } });
       if (res.getResponseCode() !== 200) return { ok: false, error: 'HTTP ' + res.getResponseCode() };
       return { ok: true, json: JSON.parse(res.getContentText()) };
     } catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }

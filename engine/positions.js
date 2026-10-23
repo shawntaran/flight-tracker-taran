@@ -7,6 +7,8 @@
 //   7 baro_altitude (m), 8 on_ground, 9 velocity (m/s), 10 true_track (deg), 11 vertical_rate (m/s), 13 geo_altitude, 14 squawk
 
 const ADSB_LOL = 'https://api.adsb.lol/v2';
+// adsb.lol answers 403 "User-Agent too generic; include valid contact info" to Node's default "node".
+const USER_AGENT = 'flight-tracker/1.0 (+https://github.com/shawntaran/flight-tracker-taran)';
 const FT_TO_M = 0.3048, KT_TO_MS = 0.514444, FPM_TO_MS = 0.00508;
 const HEX_RE = /^[0-9a-f]{6}$/i, CALLSIGN_RE = /^[A-Z0-9]{3,8}$/;
 const MAX_PER_REQUEST = 40;
@@ -56,4 +58,4 @@ function createAdsbLol(fetchJson) {
   };
 }
 
-module.exports = { createAdsbLol, toStateVector, toTelemetry, ADSB_LOL };
+module.exports = { createAdsbLol, toStateVector, toTelemetry, ADSB_LOL, USER_AGENT };
