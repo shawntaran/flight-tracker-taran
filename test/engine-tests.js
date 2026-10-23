@@ -301,12 +301,9 @@ test('vercel.json has no Vercel cron (Hobby plan) and ships the src/ logic files
   assert.ok(!('crons' in v));
   assert.ok(/src/.test(v.functions['api/cron.js'].includeFiles) && /engine/.test(v.functions['api/cron.js'].includeFiles));
 });
-test('the GitHub Actions workflow POSTs to /api/cron every 5 minutes with the CRON_SECRET bearer token', () => {
-  const w = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'tracker-cron.yml'), 'utf8');
-  assert.ok(/cron: '\*\/5 \* \* \* \*'/.test(w));
-  assert.ok(/curl -X POST "https:\/\/[^"]+\/api\/cron"/.test(w));
-  assert.ok(/Authorization: Bearer \$CRON_SECRET/.test(w) && /CRON_SECRET: \$\{\{ secrets\.CRON_SECRET \}\}/.test(w));
-  assert.ok(!/cron-secret|Bearer [A-Za-z0-9]{12,}/.test(w), 'no secret value in the workflow');
+test('no GitHub Actions schedule: the VM runs the tracker (deploy/README.md), so nothing fails and emails every 5 minutes', () => {
+  assert.ok(!fs.existsSync(path.join(ROOT, '.github', 'workflows', 'tracker-cron.yml')));
+  assert.ok(/node engine\/run\.js --scheduled/.test(fs.readFileSync(path.join(ROOT, 'deploy', 'README.md'), 'utf8')));
 });
 test('environment: process.env wins over .env.engine; only known secrets are passed to the logic', () => {
   const e = readEnv({ SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'svc', ADB_KEY: 'a', OTHER: 'z' }, null);

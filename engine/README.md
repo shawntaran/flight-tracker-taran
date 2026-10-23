@@ -1,4 +1,4 @@
-# Tracking engine (Node.js + Supabase, on Vercel, run by GitHub Actions)
+# Tracking engine (Node.js + Supabase)
 
 The 5-minute tracker without Google: it reads the `Flights` table in Supabase, checks flights with OpenSky, AeroDataBox and (optionally) FlightAware, writes the results back to `Flights`, re-plans the cab groups, sends Telegram alerts and updates the heartbeat in the `status` table.
 
@@ -46,20 +46,9 @@ The 5-minute tracker without Google: it reads the `Flights` table in Supabase, c
 
   Every call must send `Authorization: Bearer <CRON_SECRET>`; any other caller gets HTTP 401.
 
-## Schedule (GitHub Actions)
+## Schedule
 
-[`.github/workflows/tracker-cron.yml`](../.github/workflows/tracker-cron.yml) POSTs to `/api/cron` every 5 minutes.
-
-1. In the workflow, replace `YOUR_VERCEL_DOMAIN` with the live domain (for example `flight-tracker.vercel.app`).
-2. In the GitHub repository, go to Settings → Secrets and variables → Actions → New repository secret. Add `CRON_SECRET` with the same value as in Vercel.
-3. Commit and push to the default branch: GitHub only runs schedules from there. The Actions tab has a **Run workflow** button for a manual run.
-
-What to expect from GitHub's scheduler:
-- Under load, runs can start several minutes late, and occasionally one is skipped.
-- On a public repository, GitHub pauses schedules after 60 days without a commit, and you re-enable them in the Actions tab.
-- Each run takes one short job (about 10 s of a free-tier runner).
-
-The heartbeat in `status` shows whether runs are arriving.
+The tracker runs every 5 minutes from **cron on the Google Cloud VM** (`node engine/run.js --scheduled`, see [deploy/README.md](../deploy/README.md)). The Vercel endpoint `/api/cron` remains for an external scheduler, but nothing calls it: there is no GitHub Actions workflow (an earlier one with a placeholder domain failed on every run). The heartbeat in `status` shows whether runs are arriving.
 - Nothing from the repository is served publicly. The static output is the one-line `public/index.html`.
 
 ## Not carried over (yet)
