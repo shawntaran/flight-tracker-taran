@@ -310,6 +310,24 @@ test('guests on one flight share it: a VJ flight number has a callsign, and a la
   const sent = JSON.parse(sb.db.tracker_state.find((x) => x.key === 'EVENT_LOG').value).map((e) => e.msg || e.message || JSON.stringify(e)).join('\n');
   assert.ok(/VJ1801 \(Other\) LANDED/.test(sent), 'the second guest gets the landing alert too:\n' + sent);
 });
+test('an arrival still "in the air" 6 h after its ETA with no live position is marked landed, not confirmed', async () => {
+  const lh = (id, etaIso, o) => flightRow(Object.assign({ ID: id, Name: 'Guest ' + id, Direction: 'Arrival', Flight: 'LH764', 'Flight (normalised)': 'LH764',
+    'Sched Arr (IST)': '2026-10-24 18:30', 'm:schedArr': '2026-10-24T13:00:00.000Z', Status: 'DEPARTED', 'm:alertedStatus': 'DEPARTED',
+    'm:eta': etaIso, 'm:adbEta': etaIso, 'm:alertedEta': etaIso, 'm:adbCalls': 4, 'm:callsign': 'DLH764', 'm:icao24': '3c6712',
+    'ETA Source': 'airline/scheduled — no live position' }, o));
+  const stuck = lh('S1', '2026-10-24T13:00:00.000Z');                                    // 7 h past its ETA
+  const recent = lh('S2', '2026-10-24T15:00:00.000Z', { 'Sched Arr (IST)': '2026-10-24 20:30', 'm:schedArr': '2026-10-24T15:00:00.000Z' }); // 5 h
+  const seen = lh('S3', '2026-10-24T13:00:00.000Z', { 'm:lastFix': '2026-10-24T18:00:00.000Z', Flight: 'LH766', 'Flight (normalised)': 'LH766' }); // fix 2 h ago
+  const sb = fakeSupabase(tables({ Flights: [stuck, recent, seen] })), http = adsbHttp([]);
+  const r = await run(sb, http);
+  assert.ok(r.ok, r.error);
+  const row = (id) => sb.db.Flights.find((x) => x.ID === id);
+  assert.deepStrictEqual([row('S1').Status, row('S1')['ETA Source'], row('S1')['m:eta']],
+    ['LANDED', 'assumed landed — not confirmed (no update 6 h after ETA)', '2026-10-24T13:00:00.000Z']);
+  assert.deepStrictEqual([row('S2').Status, row('S3').Status], ['DEPARTED', 'DEPARTED'], 'under 6 h, or a live position since: left alone');
+  const sent = JSON.parse(sb.db.tracker_state.find((x) => x.key === 'EVENT_LOG').value).map((e) => e.msg || e.message || JSON.stringify(e)).join('\n');
+  assert.ok(/LH764 \(Guest S1\) marked LANDED, not confirmed/.test(sent) && !/LH764 \(Guest S1\) LANDED at/.test(sent), sent);
+});
 test('adsb.lol down: OpenSky is tried; both down: counted as a failed position check, the run itself still succeeds', async () => {
   const sb = fakeSupabase(tables()), http = adsbHttp(null, 503);
   assert.ok((await run(sb, http)).ok);

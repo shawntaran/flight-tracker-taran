@@ -57,6 +57,7 @@ var DEFAULTS = {
   OPENSKY_STALE_MIN: [20, 'Ignore OpenSky positions older than this'],
   LANDED_RADIUS_KM: [15, 'On-ground within this distance of the airport counts as landed'],
   NO_CONFIRM_AFTER_MIN: [60, 'Alert if no landing confirmation this long after ETA'],
+  ASSUME_LANDED_AFTER_H: [6, 'An arrival still in the air this long after its ETA, with no live position, is marked landed (not confirmed); 0 = never'],
   NOTIFY_FACULTY: [false, 'Also message faculty (needs their Telegram chat id / email)'],
   COORD_TG_CHAT_IDS: ['', 'Comma-separated Telegram chat ids for coordinators'],
   COORD_EMAILS: ['', 'Comma-separated coordinator emails'],

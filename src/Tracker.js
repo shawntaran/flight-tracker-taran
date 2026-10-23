@@ -143,6 +143,21 @@ function shareSameFlight_(rows) {
   });
 }
 
+/**
+ * An arrival still DEPARTED ASSUME_LANDED_AFTER_H after its ETA, with no live position in that time, is landed: no
+ * flight is still in the air that long after it was due, and without this a landing nobody confirmed (provider
+ * lookups used up, no ADS-B coverage) stays "in the air" for good. The ETA Source says it is not confirmed.
+ */
+function assumeLanded_(r, nowMs, C) {
+  var hours = Number(C.ASSUME_LANDED_AFTER_H);
+  if (!(hours > 0) || !r.active || r.dir !== 'ARR' || r.status !== 'DEPARTED') return;
+  var due = r.etaAt || r.adbEtaAt || r.schedArrAt;
+  if (!due || nowMs - due < hours * HOUR || (r.lastFixAt && nowMs - r.lastFixAt < hours * HOUR)) return;
+  r.status = 'LANDED';
+  r.etaAt = due;
+  r.etaSource = 'assumed landed — not confirmed (no update ' + hours + ' h after ETA)';
+}
+
 /** Merges an OpenSky observation. live = liveEta(...) or null when not seen. */
 function applyLive(r, live, nowMs) {
   if (live && live.landed) {
@@ -195,7 +210,11 @@ function describeChange(r, shift) {
   switch (r.status) {
     case 'CANCELLED': return '❌ ' + who + ' CANCELLED — contact faculty for rebooking.';
     case 'DIVERTED': return '⚠️ ' + who + ' DIVERTED — check with airline.';
-    case 'LANDED': return '🛬 ' + who + ' LANDED at ' + r.airport + ' ' + term + ' ' + fmtTimeIST(r.etaAt) + ' IST.' +
+    case 'LANDED':
+      if (/^assumed landed/.test(r.etaSource || '')) {
+        return 'ℹ️ ' + who + ' marked LANDED, not confirmed: no update since its ETA ' + fmtIST(r.etaAt) + ' IST. Please check with the guest.';
+      }
+      return '🛬 ' + who + ' LANDED at ' + r.airport + ' ' + term + ' ' + fmtTimeIST(r.etaAt) + ' IST.' +
       (r.groupId ? ' Cab ' + r.groupId + ' pickup ' + r.pickupDisp + '.' : '');
   }
   var verb = r.status === 'DEPARTED' ? '✈️ ' + who + ' airborne' : r.status === 'DELAYED' ? '🕒 ' + who + ' DELAYED' : '🕒 ' + who + ' update';
@@ -373,6 +392,8 @@ function runTick_(now, opts) {
   // First-leg connection checks: after the main checks, bounded and sharing the row's cap.
   rows.forEach(function (r) { checkFirstLeg_(r, C, out, freshInfo[r.id], now); });
   adbDrainNotices().forEach(function (n) { out.coord(n); });
+
+  rows.forEach(function (r) { assumeLanded_(r, now, C); });
 
   // 3. Cab groups (before change alerts so LANDED messages can name the cab)
   var plan = planGroups(rows, C, now);
