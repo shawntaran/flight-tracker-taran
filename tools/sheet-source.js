@@ -104,12 +104,24 @@ function readStatusRows(rows, redact) {
 }
 
 /** engine: tools/engine-status.js output (usage, usageError, apiRequests, log, providers) or null. */
+// Airport coordinates for the map (airport markers, and the line from an aircraft to where it is going). The same
+// list as the local preview's mock data (tools/mock-bridge.js); BLR is the home airport the tracker uses (src/Config.js).
+const AIRPORTS = {
+  BLR: { lat: 13.1986, lon: 77.7066, name: 'Bengaluru Kempegowda' }, DEL: { lat: 28.5562, lon: 77.1000, name: 'Delhi' },
+  BOM: { lat: 19.0887, lon: 72.8679, name: 'Mumbai' }, HYD: { lat: 17.2403, lon: 78.4294, name: 'Hyderabad' },
+  MAA: { lat: 12.9941, lon: 80.1709, name: 'Chennai' }, CCU: { lat: 22.6547, lon: 88.4467, name: 'Kolkata' },
+  COK: { lat: 10.1520, lon: 76.4019, name: 'Kochi' },
+  DXB: { lat: 25.2532, lon: 55.3657, name: 'Dubai' }, DOH: { lat: 25.2731, lon: 51.6081, name: 'Doha' },
+  SIN: { lat: 1.3644, lon: 103.9915, name: 'Singapore' }, FRA: { lat: 50.0379, lon: 8.5622, name: 'Frankfurt' },
+  LHR: { lat: 51.4700, lon: -0.4543, name: 'London Heathrow' }
+};
+
 function payload(now, conf, source, flights, groups, errors, lastTick, engine) {
   const e = engine || {};
   // The scheduler that runs the tracker reports itself in the heartbeat; the page counts it as one trigger.
   const tickTriggers = lastTick && lastTick.triggerInstalled === true ? 1 : lastTick && lastTick.triggerInstalled === false ? 0 : null;
   return {
-    generatedAt: now, preview: false, source, homeAirport: conf.homeAirport, maxSeats: conf.maxSeats, attribution: ATTRIBUTION,
+    generatedAt: now, preview: false, source, homeAirport: conf.homeAirport, maxSeats: conf.maxSeats, attribution: ATTRIBUTION, airports: AIRPORTS,
     flights, groups, log: e.log || [], tickTriggers, usage: e.usage || null, usageError: e.usage ? '' : e.usageError || USAGE_NOTE,
     apiRequests: e.apiRequests || [], providers: e.providers || {}, pickupsDone: e.pickupsDone || {}, errors, assistant: { enabled: false }, lastTick
   };

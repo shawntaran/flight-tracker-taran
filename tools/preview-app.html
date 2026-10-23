@@ -91,6 +91,7 @@
   .ft-cat-landed { --mk: var(--on-tertiary-container); }
   .ft-cat-unknown { --mk: var(--outline); }
   .ft-route { stroke: rgb(var(--mk)); stroke-opacity: .55; }
+  .ft-route.ft-route-flown { stroke-opacity: .3; }
   .ft-mk { position: relative; display: flex; align-items: center; justify-content: center; border-radius: 9999px; cursor: pointer;
     background: linear-gradient(rgb(var(--mk) / .16), rgb(var(--mk) / .16)), rgb(var(--surface-container-lowest)); box-shadow: 0 0 0 2px rgb(var(--mk)); }
   .ft-mk svg { width: 72%; height: 72%; fill: rgb(var(--mk)); }
@@ -1725,8 +1726,16 @@
     return L.circleMarker([pt.lat, pt.lon], { radius: home ? 6 : 4, weight: 2, className: home ? 'ft-ap ft-ap-home' : 'ft-ap' })
       .bindTooltip(esc(pt.code), { permanent: true, direction: 'bottom', offset: [0, 4], className: 'ft-ap-label' });
   }
-  function routeLine(ends, cat) {
-    return ends.origin && ends.dest ? L.polyline(FP.greatCircle(ends.origin, ends.dest, 48), { className: 'ft-route ft-cat-' + (cat || 'ontime'), weight: 2, dashArray: '6 6', interactive: false }) : null;
+  /**
+   * The route through the aircraft's reported position: flown (solid, faint) from the origin when it is known, and
+   * still to fly (dashed) to the destination, so the line follows the aircraft from one tracker run to the next.
+   * The origin airport is often unknown, and the line to the destination is drawn without it.
+   */
+  function routeLines(ends, here, cat, onGround) {
+    var cls = 'ft-route ft-cat-' + (cat || 'ontime'), out = [];
+    if (ends.origin) out.push(L.polyline(FP.greatCircle(ends.origin, here, 32), { className: cls + ' ft-route-flown', weight: 2, interactive: false }));
+    if (ends.dest && !onGround) out.push(L.polyline(FP.greatCircle(here, ends.dest, 32), { className: cls, weight: 2, dashArray: '6 6', interactive: false }));
+    return out;
   }
   /** Keeps marker longitudes on the same world copy as the route (no jump across the antimeridian). */
   function near(lon, ref) { if (ref == null) return lon; while (lon - ref > 180) lon -= 360; while (ref - lon > 180) lon += 360; return lon; }
@@ -1765,8 +1774,11 @@
     addAirport(FP.airportPoint(ctx.home, ctx.airports));
     items.plotted.forEach(function (x) {
       var f = x.f, pos = x.pos, ends = FP.routeEnds(f, ctx.airports, ctx.home), cat = markerCat(f);
-      if (f.status !== 'LANDED') { var line = routeLine(ends, cat); if (line) line.addTo(shared.layer); addAirport(ends.origin); addAirport(ends.dest); }
       var lon = near(pos.lon, ends.origin ? ends.origin.lon : null), bt = FS.bestTime(f);
+      if (f.status !== 'LANDED') {
+        routeLines(ends, { lat: pos.lat, lon: lon }, cat, pos.onGround).forEach(function (l) { l.addTo(shared.layer); });
+        addAirport(ends.origin); addAirport(ends.dest);
+      }
       var popup = '<div class="flex flex-col gap-1 min-w-[200px]">' +
         '<div class="flex items-center justify-between gap-2"><strong class="text-[13px]">' + esc(f.flight) + '</strong><span class="flex items-center gap-1">' +
           '<span class="ft-key ft-cat-' + cat + '"></span><span class="text-[11px] font-semibold">' + CAT_LABEL[cat] + '</span></span></div>' +

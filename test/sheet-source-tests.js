@@ -60,8 +60,9 @@ const fullTabs = (flights) => ({ Flights: flights || flightsTab([DELAYED_ROW, DE
 console.log('mapping (Flights tab -> dashboard contract)');
 test('the payload has exactly the dashboard contract keys plus source and lastTick', async () => {
   const d = await source(fullTabs()).get();
-  assert.deepStrictEqual(Object.keys(d).sort(), ['apiRequests', 'assistant', 'attribution', 'errors', 'flights', 'generatedAt', 'groups', 'homeAirport', 'lastTick',
+  assert.deepStrictEqual(Object.keys(d).sort(), ['airports', 'apiRequests', 'assistant', 'attribution', 'errors', 'flights', 'generatedAt', 'groups', 'homeAirport', 'lastTick',
     'log', 'maxSeats', 'pickupsDone', 'preview', 'providers', 'source', 'tickTriggers', 'usage', 'usageError'].sort());
+  assert.deepStrictEqual(d.airports.BLR, { lat: 13.1986, lon: 77.7066, name: 'Bengaluru Kempegowda' }, 'the map needs the home airport to draw routes to it');
   assert.deepStrictEqual(Object.keys(d.flights[0]).sort(), ['active', 'airport', 'depActualAt', 'depSchedAt', 'dir', 'etaAt', 'etaSource', 'final', 'flight', 'gate', 'groupId', 'id',
     'invalid', 'lastCheckDisp', 'lastError', 'name', 'pickupDisp', 'schedAt', 'status', 'terminal'].sort());
   assert.strictEqual(d.source, S.SOURCE_FLIGHTS);
