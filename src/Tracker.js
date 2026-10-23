@@ -124,16 +124,16 @@ function applyInfo(r, info, nowMs) {
 /** Merges an OpenSky observation. live = liveEta(...) or null when not seen. */
 function applyLive(r, live, nowMs) {
   if (live && live.landed) {
-    r.status = 'LANDED'; r.etaAt = live.fixMs; r.lastFixAt = live.fixMs; r.etaSource = 'live (OpenSky, on ground)';
+    r.status = 'LANDED'; r.etaAt = live.fixMs; r.lastFixAt = live.fixMs; r.etaSource = 'live (ADS-B, on ground)';
     return;
   }
   if (live && live.etaMs) {
     if (r.status !== 'LANDED') r.status = 'DEPARTED';
     r.etaAt = live.etaMs; r.lastFixAt = live.fixMs;
-    r.etaSource = 'live (OpenSky, ' + Math.round(live.distKm) + ' km out)';
+    r.etaSource = 'live (ADS-B, ' + Math.round(live.distKm) + ' km out)'; // OpenSky or, in the Node engine, adsb.lol
     return;
   }
-  // Not visible (OpenSky coverage is patchy over the ocean / Middle East).
+  // Not visible (ADS-B coverage is patchy over the ocean / Middle East).
   if (r.lastFixAt && nowMs - r.lastFixAt < 45 * MIN) {
     r.etaSource = 'last live fix ' + fmtTimeIST(r.lastFixAt) + ' IST (no coverage now)';
   } else if (r.status === 'DEPARTED') {
@@ -233,7 +233,8 @@ function runTick_(now, opts) {
        (!r.schedDepAt && r.schedArrAt && now >= r.schedArrAt - C.LIVE_WINDOW_NO_DEP_H * HOUR));
   });
   if (airborne.length) {
-    var os = openskyStates(airborne.map(function (r) { return r.icao24 || ''; }));
+    // Callsigns go along for position sources that look up by callsign (the Node engine's adsb.lol); OpenSky ignores them.
+    var os = openskyStates(airborne.map(function (r) { return r.icao24 || ''; }), airborne.map(function (r) { return r.callsign || ''; }));
     var props = PropertiesService.getScriptProperties();
     if (os.ok) {
       props.setProperty('OPENSKY_FAILS', '0');

@@ -216,7 +216,7 @@
       </div>
       <div id="sync-chip" class="hidden 2xl:flex shrink-0 items-center gap-1.5 px-2 py-0.5 rounded bg-tertiary-fixed/20 border border-tertiary-fixed-dim/40 text-on-tertiary-fixed-variant max-w-[22rem]">
         <span id="sync-dot" class="w-1.5 h-1.5 rounded-full bg-on-tertiary-container"></span>
-        <span id="sync-label" class="font-label-sm text-label-sm uppercase font-semibold whitespace-nowrap truncate">Live Syncing (OpenSky / ADB)</span>
+        <span id="sync-label" class="font-label-sm text-label-sm uppercase font-semibold whitespace-nowrap truncate">Live Syncing (ADS-B / ADB)</span>
       </div>
       <div class="flex items-center gap-space-xs text-on-surface-variant shrink-0">
         <span id="synced-ago" class="font-data-mono text-data-mono hidden 2xl:inline whitespace-nowrap">Loading…</span>
@@ -490,7 +490,7 @@
             </div>
             <div id="fl-map-fallback" class="hidden absolute inset-0 z-[460] flex items-center justify-center text-center p-4 font-body-sm text-body-sm text-on-surface-variant bg-surface-container-low">The map library could not load (offline?). The flight cards below are unaffected.</div>
           </div>
-          <div class="px-space-md py-2 flex flex-wrap justify-between gap-2 font-data-mono text-[11px] text-on-surface-variant"><span id="fl-map-counts"></span><span>Positions from the last tracker tick · no extra provider calls</span></div>
+          <div class="px-space-md py-2 flex flex-wrap justify-between gap-2 font-data-mono text-[11px] text-on-surface-variant"><span id="fl-map-counts"></span><span>Positions from the tracker's last run (adsb.lol) · no extra provider calls</span></div>
           <details id="fl-map-unplotted-wrap" class="px-space-md pb-space-sm">
             <summary id="fl-map-unplotted-sum" class="cursor-pointer font-label-sm text-label-sm uppercase tracking-wider font-bold text-on-surface-variant">Not on the map</summary>
             <div id="fl-map-unplotted" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1 pt-2"></div>
@@ -1064,7 +1064,7 @@
     var n = d.tickTriggers, on = n >= 1;
     $('engine-dot').className = 'w-2 h-2 rounded-full ' + (n === 1 ? 'bg-on-tertiary-container animate-pulse' : n > 1 ? 'bg-error' : 'bg-outline');
     $('engine-label').textContent = n == null ? 'Engine status unknown' : n === 1 ? 'Engine Active' : n > 1 ? n + ' triggers (duplicate)' : 'Engine stopped';
-    $('sync-label').textContent = d.preview ? 'Mock data (local preview)' : d.source ? 'Live: ' + d.source : on ? 'Live Syncing (OpenSky / ADB)' : 'Tracking stopped';
+    $('sync-label').textContent = d.preview ? 'Mock data (local preview)' : d.source ? 'Live: ' + d.source : on ? 'Live Syncing (ADS-B / ADB)' : 'Tracking stopped';
     $('preview-badge').textContent = d.preview ? '⚗ Local Preview · Mock Data' : '⚗ Local Preview · Supabase Data';
     $('sync-dot').className = 'w-1.5 h-1.5 rounded-full ' + (on ? 'bg-on-tertiary-container' : 'bg-outline');
     $('trigger-note').textContent = n == null ? '' : on ? 'Trigger installed' : 'Start tracking from the sheet menu';
@@ -1458,7 +1458,7 @@
   }
   function telemetryHtml(f, now, chip) {
     var t = f.telemetry;
-    if (!t) return panel('insights', 'Telemetry', '', '<p class="font-body-sm text-[12px] text-on-surface-variant">No live position for this flight. Values appear once OpenSky reports one.</p>');
+    if (!t) return panel('insights', 'Telemetry', '', '<p class="font-body-sm text-[12px] text-on-surface-variant">No live position for this flight. Values appear once the tracker receives one while it is in the air (adsb.lol).</p>');
     var rows = [];
     if (t.onGround) rows.push(kv('State', 'On ground'));
     if (typeof t.altFt === 'number') rows.push(kv('Altitude', t.altFt.toLocaleString('en-IN') + ' ft'));
@@ -1662,7 +1662,7 @@
   // keyless; dark theme is a CSS filter on the tile pane so markers keep the dashboard colours).
   var FP = window.FlightPosition;
   var TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-  var TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors';
+  var TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors · positions <a href="https://adsb.lol" target="_blank" rel="noopener">adsb.lol</a> (<a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener">ODbL</a>)';
   var POS_CHIP = { fresh: 'bg-secondary-fixed text-on-secondary-fixed', stale: 'bg-surface-container-high text-on-surface-variant',
     grounded: 'bg-tertiary-fixed text-on-tertiary-fixed-variant', unavailable: 'bg-surface-container text-on-surface-variant' };
   var POS_ICON = { fresh: 'my_location', stale: 'history', grounded: 'flight_land', unavailable: 'location_off' };
@@ -1995,7 +1995,7 @@
         '<div class="flex justify-between font-data-mono text-[10px] text-on-surface-variant"><span>Requests: ' + (u ? u.requests + '/' + u.requestLimit : '—') + '</span>' +
         '<span>Window: ' + (u ? u.window : '—') + '</span></div></div>' +
       '<div class="flex justify-between items-center text-[11px]"><span class="text-on-surface-variant">Enabled</span><span class="font-data-mono text-on-tertiary-container font-semibold">Yes</span></div>';
-    var pv = d.providers || {}, os = pv.opensky, tg = pv.telegram;
+    var pv = d.providers || {}, os = pv.positions, tg = pv.telegram;
     function providerCard(icon, title, status, ok, rows) {
       return '<div class="flex items-center justify-between gap-2"><div class="flex items-center gap-1.5 min-w-0"><span class="material-symbols-outlined text-[18px] text-primary">' + icon + '</span>' +
         '<span class="font-label-md text-label-md font-semibold text-on-surface truncate">' + esc(title) + '</span></div>' +
@@ -2005,13 +2005,15 @@
             '<span class="font-data-mono text-right ' + (r[2] ? 'text-error' : 'text-on-surface') + '">' + esc(r[1]) + '</span></div>';
         }).join('') + '</div>';
     }
-    var osStatus = !os ? 'Not monitored' : os.fails >= 2 ? 'Failing (' + os.fails + ' in a row)' : os.fails === 1 ? 'Last call failed' : os.lastOkAt ? 'Active' : 'No calls yet';
-    $('au-opensky-card').innerHTML = providerCard('radar', 'OpenSky Network', osStatus, !!os && os.fails === 0, [
-      ['Type', 'ADS-B live positions'],
-      ['Auth', !os ? '—' : os.account ? 'Account (API client)' : 'Anonymous', !!os && !os.account],
+    // Positions are only asked for while a guest's flight is (about to be) in the air, so "no calls yet" is normal on a quiet day.
+    var osStatus = !os ? 'Not monitored' : os.fails >= 2 ? 'Failing (' + os.fails + ' in a row)' : os.fails === 1 ? 'Last call failed' : os.lastOkAt ? 'Active' : 'Waiting for an airborne guest';
+    $('au-opensky-card').innerHTML = providerCard('radar', 'Live positions', osStatus, !!os && os.fails === 0, [
+      ['Source', 'adsb.lol (OpenSky as fallback)'],
+      ['Cost', 'Free, no key'],
+      ['Flights with a position', os ? String(os.tracked || 0) : '—'],
       ['Last success', os && os.lastOkAt ? hmd(os.lastOkAt, Date.now()) : '—'],
       ['Last call', os && os.lastAt ? hmd(os.lastAt, Date.now()) + ' · ' + os.lastStatus : '—', !!os && !!os.lastStatus && os.lastStatus !== 'OK']
-    ]) + (os && os.fails >= 2 && !os.account ? '<p class="text-[11px] leading-snug text-error">OpenSky refuses most anonymous requests from servers. Add OPENSKY_CLIENT_ID and OPENSKY_CLIENT_SECRET to .env.engine.</p>' : '');
+    ]);
     var tgOk = !!tg && !(tg.failed24h > 0) && !tg.lastProblem;
     $('au-telegram-card').innerHTML = providerCard('send', 'Telegram Dispatch', !tg ? 'Not monitored' : !tgOk ? 'Problems' : tg.sent24h ? 'Active' : 'Idle', tgOk, [
       ['Sent (24 h)', tg && tg.sent24h != null ? String(tg.sent24h) : '—'],

@@ -260,6 +260,64 @@ test('the dashboard reads the same budget the engine enforces, plus OpenSky and 
   assert.ok(s.providers.telegram.sent24h >= 1 && s.apiRequests.length >= 2 && s.log.length >= 1, JSON.stringify(s.providers.telegram));
 });
 
+console.log('engine: live positions (adsb.lol, OpenSky as fallback)');
+const POS = require(path.join(ROOT, 'engine', 'positions.js'));
+// UAE568 (F1's callsign), about 300 km north of BLR, cruising south.
+const ADSB_AC = { hex: '896123', flight: 'UAE568  ', lat: 15.9, lon: 77.7, alt_baro: 35000, gs: 450, track: 181, baro_rate: -64, squawk: '2214', seen_pos: 2, seen: 1 };
+const adsbHttp = (ac, code) => fakeHttp((req) => (/adsb\.lol/.test(req.url) ? (code ? { code, body: 'busy' } : { code: 200, body: JSON.stringify({ now: NOW, ac: ac || [] }) }) : null));
+test('an adsb.lol aircraft becomes an OpenSky-style state vector (metres, m/s, seconds) and dashboard telemetry', () => {
+  const s = POS.toStateVector(ADSB_AC, NOW);
+  assert.deepStrictEqual([s[0], s[1].trim(), s[3], s[5], s[6], Math.round(s[7]), s[8], Math.round(s[9]), s[10]], ['896123', 'UAE568', (NOW - 2000) / 1000, 77.7, 15.9, 10668, false, 231, 181]);
+  assert.strictEqual(POS.toStateVector(Object.assign({}, ADSB_AC, { alt_baro: 'ground' }), NOW)[8], true);
+  assert.strictEqual(POS.toStateVector({ hex: 'x', flight: 'NOPOS' }, NOW), null, 'no position, no state');
+  assert.deepStrictEqual(POS.toTelemetry(s, 'adsb.lol'), { lat: 15.9, lon: 77.7, onGround: false, altFt: 35000, gsKts: 450, headingDeg: 181, vsFpm: -60, squawk: '2214', fixAt: NOW - 2000, callsign: 'UAE568', source: 'adsb.lol' });
+});
+test('lookups: one request by transponder id, one by callsign only for flights without one; nothing when nothing is airborne', () => {
+  const urls = [];
+  const lookup = POS.createAdsbLol((u) => { urls.push(u); return { ok: true, json: { now: NOW, ac: [] } }; });
+  lookup(['3c6712', '', 'BAD!'], ['DLH764', 'UAE568', 'QTR572']);
+  assert.deepStrictEqual(urls, ['https://api.adsb.lol/v2/icao/3c6712', 'https://api.adsb.lol/v2/callsign/UAE568,QTR572']);
+  urls.length = 0;
+  assert.deepStrictEqual(lookup([], []), { ok: true, states: [], source: 'adsb.lol' });
+  assert.strictEqual(urls.length, 0);
+  assert.ok(!POS.createAdsbLol(() => ({ ok: false, error: 'HTTP 503' }))(['3c6712'], ['']).ok);
+});
+test('a run: the airborne guest gets a live ETA from adsb.lol, and the position is saved for the map', async () => {
+  const sb = fakeSupabase(tables()), http = adsbHttp([ADSB_AC]);
+  const r = await run(sb, http);
+  assert.ok(r.ok, r.error);
+  assert.ok(http.calls.some((c) => c.url === 'https://api.adsb.lol/v2/callsign/UAE568'), http.calls.map((c) => c.url).join('\n'));
+  const f1 = sb.db.Flights.find((x) => x.ID === 'F1');
+  assert.deepStrictEqual([f1.Status, /^live \(ADS-B, \d+ km out\)$/.test(f1['ETA Source'])], ['DEPARTED', true], f1['ETA Source']);
+  const pos = JSON.parse(sb.db.tracker_state.find((x) => x.key === 'POSITIONS').value);
+  assert.deepStrictEqual([Object.keys(pos), pos.F1.lat, pos.F1.source, pos.F1.callsign], [['F1'], 15.9, 'adsb.lol', 'UAE568']);
+  assert.ok(JSON.parse(sb.db.tracker_state.find((x) => x.key === 'REQUEST_LOG').value).some((x) => x.provider === 'adsb.lol' && x.status === 'OK'));
+});
+test('adsb.lol down: OpenSky is tried; both down: counted as a failed position check, the run itself still succeeds', async () => {
+  const sb = fakeSupabase(tables()), http = adsbHttp(null, 503);
+  assert.ok((await run(sb, http)).ok);
+  assert.ok(http.calls.some((c) => /opensky-network\.org\/api\/states/.test(c.url)), 'fell back to OpenSky');
+  const sb2 = fakeSupabase(tables());
+  await run(sb2, fakeHttp((req) => (/adsb\.lol|opensky/.test(req.url) ? { code: 503, body: '' } : null)));
+  assert.strictEqual(sb2.db.tracker_state.find((x) => x.key === 'prop:OPENSKY_FAILS').value, '1');
+});
+test('saved positions: newer ones replace older, a deleted guest\'s and anything over 6 h old are dropped', () => {
+  const { savePositions } = require(path.join(ROOT, 'engine', 'run.js'));
+  const m = new Map([['POSITIONS', JSON.stringify({ F1: { fixAt: NOW - 7 * 3600e3 }, F2: { fixAt: NOW - 60e3 }, GONE: { fixAt: NOW } })]]);
+  const st = { get: (k) => m.get(k) || null, set: (k, v) => m.set(k, v) };
+  savePositions(st, { F3: { fixAt: NOW, lat: 1 } }, ['F1', 'F2', 'F3'], NOW);
+  assert.deepStrictEqual(Object.keys(JSON.parse(m.get('POSITIONS'))).sort(), ['F2', 'F3']);
+});
+test('the dashboard puts each saved position on its flight (the map plots flight.telemetry)', async () => {
+  const S = require(path.join(ROOT, 'tools', 'sheet-source.js'));
+  const { toRows } = require(path.join(ROOT, 'local-assistant', 'src', 'supabase.js'));
+  const tel = POS.toTelemetry(POS.toStateVector(ADSB_AC, NOW), 'adsb.lol');
+  const get = S.createSheetSource({ previewSource: 'flights', now: () => NOW, readRange: async (tab) => (tab === 'Flights' ? { rows: toRows([F1, F2], 'Flights') } : { missing: true }),
+    engineStatus: async () => ({ positions: { F1: tel }, providers: {} }) });
+  const d = await get();
+  assert.deepStrictEqual([d.flights.find((f) => f.id === 'F1').telemetry, d.flights.find((f) => f.id === 'F2').telemetry], [tel, undefined]);
+});
+
 console.log('engine: the sandbox');
 test('every Google service is absent from the sandbox; touching one throws and is recorded', () => {
   const core = createCore({ get: () => null, set() {}, del() {} }, {}, { log: () => {} });

@@ -74,7 +74,8 @@ function latestKind(dir, etaSource, hasLatest) {
  * OpenSky fix no older than staleMin (the tracker's OPENSKY_STALE_MIN). Nothing is interpolated.
  */
 function liveState(etaSource, lastFix, nowMs, staleMin, airport) {
-  if (/^live \(OpenSky, on ground\)/i.test(etaSource) && lastFix != null) {
+  // "OpenSky": rows written before the label became source-neutral ("ADS-B": OpenSky or the Node engine's adsb.lol).
+  if (/^live \((OpenSky|ADS-B), on ground\)/i.test(etaSource) && lastFix != null) {
     return { state: 'on ground', summary: 'on the ground at ' + airport, asOf: lastFix, ageMin: Math.max(0, Math.round((nowMs - lastFix) / MIN)) };
   }
   if (lastFix == null) return { state: 'unavailable' };

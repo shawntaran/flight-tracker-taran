@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const { fetchSync: realFetchSync, sleepSync } = require('./sync-fetch');
+const { createAdsbLol, toTelemetry } = require('./positions');
 
 const SRC = path.join(__dirname, '..', 'src');
 const LOGIC_FILES = ['Util.js', 'Config.js', 'Sheet.js', 'Providers.js', 'AdbClient.js', 'Grouping.js', 'Alerts.js', 'Tracker.js'];
@@ -38,7 +39,7 @@ function toRequest(url, o) {
   return { url, method: String(o.method || (o.payload != null ? 'post' : 'get')).toUpperCase(), headers, body };
 }
 
-const PROVIDERS = [['aerodatabox', 'AeroDataBox'], ['auth.opensky-network.org', 'OpenSky (login)'], ['opensky-network.org', 'OpenSky'],
+const PROVIDERS = [['aerodatabox', 'AeroDataBox'], ['adsb.lol', 'adsb.lol'], ['auth.opensky-network.org', 'OpenSky (login)'], ['opensky-network.org', 'OpenSky'],
   ['flightaware.com', 'FlightAware'], ['api.telegram.org', 'Telegram']];
 
 /**
@@ -69,7 +70,7 @@ function createCore(state, data, opts) {
   const secrets = o.secrets || {};
   const fetchSync = o.fetchSync || realFetchSync;
   const sleep = o.sleep || sleepSync;
-  const output = { flights: null, groups: null, heartbeat: null, log: [], usage: [], requests: [], configIssues: [] };
+  const output = { flights: null, groups: null, heartbeat: null, log: [], usage: [], requests: [], positions: {}, configIssues: [] };
   const googleTouches = [];
   const print = o.log || ((line) => console.log(line));
 
@@ -139,6 +140,25 @@ function createCore(state, data, opts) {
     ctx.cfgCache_ = merged.config;
     return ctx.cfgCache_;
   };
+  // Live positions: adsb.lol first (OpenSky refuses Google Cloud), OpenSky as the fallback (engine/positions.js).
+  // The states found are kept so tick() can record each flight's latest position for the dashboard map.
+  const openskyOriginal = ctx.openskyStates;
+  let lastStates = [], lastSource = '';
+  const fetchJson = (url) => {
+    try {
+      const res = sandbox.UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+      if (res.getResponseCode() !== 200) return { ok: false, error: 'HTTP ' + res.getResponseCode() };
+      return { ok: true, json: JSON.parse(res.getContentText()) };
+    } catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
+  };
+  const adsbLol = createAdsbLol(fetchJson);
+  ctx.openskyStates = function (icao24s, callsigns) {
+    const a = adsbLol(icao24s, callsigns);
+    if (a.ok) { lastStates = a.states; lastSource = 'adsb.lol'; return a; }
+    const b = openskyOriginal(icao24s);
+    if (b.ok) { lastStates = b.states; lastSource = 'OpenSky'; return b; }
+    return { ok: false, error: a.error + ' | ' + b.error };
+  };
   ctx.loadExtraAirlines = function () { /* the Airlines sheet has no table yet: built-in airline list only */ };
   ctx.readFlights = function () {
     return (data.flights || []).map((r, i) => Object.assign({}, r, { _row: i + 2 }));
@@ -191,7 +211,16 @@ function createCore(state, data, opts) {
   /** One tracker run, as Tracker.js tick() does it (without the Apps Script lock). -> {summary} | {error} */
   function tick(nowMs, tickOpts) {
     try {
-      return { summary: ctx.runTick_(nowMs, tickOpts || {}) };
+      lastStates = []; lastSource = '';
+      const summary = ctx.runTick_(nowMs, tickOpts || {});
+      output.positions = {};
+      if (lastStates.length) {
+        (output.flights || []).forEach((r) => {
+          const st = ctx.findState(lastStates, r.icao24, r.callsign);
+          if (st) output.positions[r.id] = toTelemetry(st, lastSource);
+        });
+      }
+      return { summary };
     } catch (e) {
       const msg = ctx.redactSecrets((e && e.message) || e) || 'unknown error';
       ctx.logEvent('ERROR', '', ctx.redactSecrets((e && e.stack) || e));

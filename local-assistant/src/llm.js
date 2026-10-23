@@ -91,9 +91,10 @@ function createGeminiLlm({ model, apiKey, timeoutMs, enabled, redact, genai }) {
         : String(status) === '429' || /RESOURCE_EXHAUSTED|quota/i.test(s) ? ' (free-tier rate limit or quota reached; try again shortly)' : '';
     return redact((status ? 'HTTP ' + status + hint + ': ' : '') + s).slice(0, 200);
   };
-  const withTimeout = (p, ms) => {
+  /** ms: time left for this attempt; limit: the configured timeout the message names. */
+  const withTimeout = (p, ms, limit) => {
     let timer;
-    return Promise.race([p, new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('timed out after ' + ms + ' ms')), ms); })])
+    return Promise.race([p, new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('timed out after ' + (limit || ms) + ' ms')), ms); })])
       .finally(() => clearTimeout(timer));
   };
 
@@ -119,7 +120,7 @@ function createGeminiLlm({ model, apiKey, timeoutMs, enabled, redact, genai }) {
     if (g.systemInstruction) config.systemInstruction = g.systemInstruction;
     if (o.responseFormat && o.responseFormat.type === 'json_object') config.responseMimeType = 'application/json';
     const started = Date.now();
-    const call = () => withTimeout(ai().models.generateContent({ model, contents: g.contents, config }), timeoutMs - (Date.now() - started));
+    const call = () => withTimeout(ai().models.generateContent({ model, contents: g.contents, config }), timeoutMs - (Date.now() - started), timeoutMs);
     let res;
     try {
       try {

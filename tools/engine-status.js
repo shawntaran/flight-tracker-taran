@@ -8,7 +8,7 @@
 const path = require('path');
 const { createCore } = require('../engine/core');
 const { createStore } = require('../engine/supabase-store');
-const { readEnv, makeClient, REQUEST_LOG, EVENT_LOG } = require('../engine/run');
+const { readEnv, makeClient, REQUEST_LOG, EVENT_LOG, POSITIONS } = require('../engine/run');
 const { readMarks } = require('./pickups');
 
 const ENV_FILE = path.join(__dirname, '..', '.env.engine');
@@ -21,7 +21,9 @@ const parseList = (s) => { try { const v = JSON.parse(s || '[]'); return Array.i
 function summarize(stateMap, configRows, nowMs, secretsSet) {
   const view = { get: (k) => (stateMap.has(k) ? stateMap.get(k) : null), set: () => {}, del: () => {} }; // read-only
   const core = createCore(view, { config: configRows || [] }, { now: () => nowMs, log: () => {} });
-  const out = { usage: null, usageError: '', apiRequests: [], log: [], providers: {}, pickupsDone: readMarks(stateMap) };
+  let positions = {};
+  try { positions = JSON.parse(stateMap.get(POSITIONS) || '{}') || {}; } catch (e) { positions = {}; }
+  const out = { usage: null, usageError: '', apiRequests: [], log: [], providers: {}, pickupsDone: readMarks(stateMap), positions };
   try {
     const u = core.usageSummary();
     out.usage = { window: u.window, units: u.units, unitLimit: u.unitLimit, requests: u.requests, requestLimit: u.requestLimit,
@@ -38,6 +40,10 @@ function summarize(stateMap, configRows, nowMs, secretsSet) {
   const os = last('OpenSky');
   out.providers.opensky = { fails, account: !!(secretsSet && secretsSet.OPENSKY_CLIENT_ID && secretsSet.OPENSKY_CLIENT_SECRET),
     lastAt: os ? os.at : null, lastStatus: os ? os.status : '', lastOkAt: (lastOk('OpenSky') || {}).at || null };
+  // Live positions: adsb.lol first, OpenSky as the fallback (engine/positions.js). fails counts runs where both failed.
+  const ad = last('adsb.lol');
+  out.providers.positions = { fails, lastAt: ad ? ad.at : null, lastStatus: ad ? ad.status : '', lastOkAt: (lastOk('adsb.lol') || {}).at || null,
+    tracked: Object.keys(positions).length };
   let tg = null;
   try { tg = core.ctx.tgDeliverySummary_(parseList(stateMap.get('TG_DELIVERIES')), nowMs); } catch (e) { tg = null; }
   const t = last('Telegram');

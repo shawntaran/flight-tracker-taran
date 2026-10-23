@@ -22,6 +22,20 @@ const SECRET_KEYS = ['ADB_KEY', 'TG_BOT_TOKEN', 'OPENSKY_CLIENT_ID', 'OPENSKY_CL
 const REQUEST_LOG = 'REQUEST_LOG', EVENT_LOG = 'EVENT_LOG';
 const REQUEST_LOG_MAX = 200, EVENT_LOG_MAX = 200;
 
+const POSITIONS = 'POSITIONS';
+const POSITION_MAX_AGE_MS = 6 * 3600 * 1000; // = tools/flight-position.js maxAgeMin: older positions are not plotted
+
+/** Latest live position per Flights row, for the dashboard map. Kept 6 h; rows that no longer exist are dropped. */
+function savePositions(state, fresh, ids, nowMs) {
+  let all;
+  try { all = JSON.parse(state.get(POSITIONS) || '{}'); } catch (e) { all = {}; }
+  if (!all || typeof all !== 'object') all = {};
+  const before = JSON.stringify(all), keep = new Set(ids);
+  Object.assign(all, fresh || {});
+  Object.keys(all).forEach((id) => { if (!keep.has(id) || !(nowMs - (all[id] && all[id].fixAt || 0) <= POSITION_MAX_AGE_MS)) delete all[id]; });
+  if (JSON.stringify(all) !== before) state.set(POSITIONS, JSON.stringify(all));
+}
+
 /** Adds this run's entries to a JSON list in tracker_state, keeping the newest max and nothing older than maxAgeMs. */
 function appendLog(state, key, entries, max, maxAgeMs, nowMs) {
   if (!entries || !entries.length) return;
@@ -93,6 +107,7 @@ async function runTracker(opts) {
     const retentionMs = Math.min(Number(core.ctx.cfg().ADB_RETENTION_HOURS) || 0, 168) * 3600 * 1000;
     appendLog(state, REQUEST_LOG, core.output.requests, REQUEST_LOG_MAX, 7 * 24 * 3600 * 1000, t0);
     appendLog(state, EVENT_LOG, core.output.log, EVENT_LOG_MAX, retentionMs, t0); // lines can carry provider status text
+    savePositions(state, core.output.positions, flights.rows.map((r) => r.id), t0);
     // Persist in the order that matters most: usage accounting first (money), then data, then heartbeat.
     writes.state = await store.saveState(state);
     let persistError = null;
@@ -136,4 +151,4 @@ if (require.main === module) {
   main(process.argv.slice(2)).catch((err) => { console.error('Fatal: ' + ((err && err.message) || err)); process.exitCode = 1; });
 }
 
-module.exports = { runTracker, readEnv, makeClient, appendLog, SECRET_KEYS, REQUEST_LOG, EVENT_LOG };
+module.exports = { runTracker, readEnv, makeClient, appendLog, savePositions, SECRET_KEYS, REQUEST_LOG, EVENT_LOG, POSITIONS };

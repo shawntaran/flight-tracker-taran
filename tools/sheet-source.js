@@ -160,6 +160,8 @@ function createSheetSource(opts) {
     if (engineStatus) {
       try { engine = await engineStatus(cf.rows || []); } catch (e) { engine = { usageError: redact((e && e.message) || e) }; }
     }
+    const pos = (engine && engine.positions) || {};
+    m.flights.forEach((f) => { if (pos[f.id]) f.telemetry = pos[f.id]; }); // the tracker's latest live position (adsb.lol / OpenSky)
     return payload(t, conf, SOURCE_FLIGHTS, m.flights, gr.rows ? mapGroupsRows(gr.rows, m.flights) : [], errors, lastTick, engine);
   }
 
