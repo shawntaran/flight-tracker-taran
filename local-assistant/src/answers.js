@@ -244,7 +244,8 @@ async function answer(question, deps) {
   const matched = matchFlights(question, snap);
   if (!deps.llm.enabled) return { text: fallback(question, snap, matched, nowMs, 'unavailable') + stamp, via: 'fallback' };
   const ctx = buildModelContext(snap, question, matched, nowMs);
-  const r = await deps.llm.chat(buildMessages(ctx, question));
+  // No thinking: a reasoning model could otherwise spend the whole token budget before answering (and is slower).
+  const r = await deps.llm.chat(buildMessages(ctx, question), { reasoningEffort: 'none' });
   if (!r.ok) return { text: fallback(question, snap, matched, nowMs, 'unavailable') + stamp, via: 'fallback', error: r.error };
   const g = guardAnswer(r.text, ctx);
   if (!g.ok) return { text: fallback(question, snap, matched, nowMs, 'rejected') + stamp, via: 'fallback', error: g.reason };

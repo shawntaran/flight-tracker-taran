@@ -8,6 +8,16 @@ function createLlm({ baseUrl, model, apiKey, timeoutMs, enabled, fetch, redact }
   const headers = () => Object.assign({ 'Content-Type': 'application/json' }, apiKey ? { Authorization: 'Bearer ' + apiKey } : {});
   const host = (() => { try { const u = new URL(baseUrl); return u.protocol + '//' + u.host; } catch (e) { return '(invalid URL)'; } })();
   const safe = (e) => redact(e && e.name === 'AbortError' ? 'timed out after ' + timeoutMs + ' ms' : (e && e.message) || e).slice(0, 160);
+  // LLM_MODEL may list several models, comma-separated: the first is asked, and OpenRouter moves on to the next one
+  // itself when a model is rate-limited or down (its "models" field). Other servers get the first model only.
+  const models = String(model || '').split(',').map((m) => m.trim()).filter(Boolean);
+  const primary = models[0] || '';
+  /** The server's own error text (OpenRouter: {error: {message}}), short and redacted, or ''. */
+  const serverSays = (text) => {
+    let m = '';
+    try { const j = JSON.parse(text); m = (j && j.error && (j.error.message || j.error)) || ''; } catch (e) { m = ''; }
+    return typeof m === 'string' && m ? ': ' + redact(m).replace(/\s+/g, ' ').slice(0, 140) : '';
+  };
 
   async function request(path, init, ms) {
     const ctl = new AbortController();
@@ -28,7 +38,8 @@ function createLlm({ baseUrl, model, apiKey, timeoutMs, enabled, fetch, redact }
   async function chat(messages, opts) {
     if (!enabled) return { ok: false, error: 'model not configured' };
     const o = opts || {};
-    const body = { model, messages, temperature: 0, max_tokens: o.maxTokens || 600, stream: false };
+    const body = { model: primary, messages, temperature: 0, max_tokens: o.maxTokens || 600, stream: false };
+    if (models.length > 1) body.models = models;
     if (o.reasoningEffort) body.reasoning_effort = o.reasoningEffort;
     if (o.responseFormat) body.response_format = o.responseFormat;
     let r;
@@ -37,7 +48,10 @@ function createLlm({ baseUrl, model, apiKey, timeoutMs, enabled, fetch, redact }
     } catch (e) {
       return { ok: false, error: safe(e) };
     }
-    if (r.status < 200 || r.status >= 300) return { ok: false, error: 'HTTP ' + r.status + (r.status === 401 || r.status === 403 ? ' (check LLM_API_KEY)' : r.status === 404 ? ' (check LLM_BASE_URL and LLM_MODEL)' : '') };
+    if (r.status < 200 || r.status >= 300) {
+      return { ok: false, error: 'HTTP ' + r.status + (r.status === 401 || r.status === 403 ? ' (check LLM_API_KEY)' : r.status === 404 ? ' (check LLM_BASE_URL and LLM_MODEL)'
+        : r.status === 429 ? ' (rate-limited: too many requests for this model or key)' : '') + serverSays(r.body) };
+    }
     let j;
     try { j = JSON.parse(r.body); } catch (e) { return { ok: false, error: 'invalid JSON from the model server' }; }
     const text = j && Array.isArray(j.choices) && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
@@ -57,8 +71,10 @@ function createLlm({ baseUrl, model, apiKey, timeoutMs, enabled, fetch, redact }
       out.reachable = true;
       try {
         const ids = (JSON.parse(r.body).data || []).map((m) => m && m.id);
-        out.modelListed = ids.indexOf(model) >= 0;
-        out.detail = out.modelListed ? 'model available' : 'model "' + model + '" not in the server\'s model list';
+        const missing = models.filter((m) => ids.indexOf(m) < 0);
+        out.modelListed = !missing.length;
+        out.detail = !missing.length ? (models.length > 1 ? 'all ' + models.length + ' models available' : 'model available')
+          : 'not in the server\'s model list: ' + missing.map((m) => '"' + m + '"').join(', ');
       } catch (e) { out.detail = 'reachable; model list unreadable'; }
     } catch (e) {
       out.detail = safe(e);

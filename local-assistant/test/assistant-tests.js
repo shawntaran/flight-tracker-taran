@@ -238,6 +238,30 @@ test('timeout, invalid JSON, malformed output and HTTP errors fall back determin
     assert.strictEqual((await A.answer('What needs attention today?', deps(llm))).text, A.UNAVAILABLE);
   }
 });
+test('OpenRouter: a comma-separated LLM_MODEL becomes model + models; errors carry the server\'s message; health checks each model', async () => {
+  const bodies = [];
+  const ok = createLlm({ baseUrl: 'https://openrouter.ai/api/v1', model: 'a/one:free, b/two:free ,c/three:free', apiKey: 'sk-or-test', enabled: true, timeoutMs: 1000,
+    redact: makeRedactor(['sk-or-test']), fetch: async (u, init) => { bodies.push(JSON.parse(init.body)); return fakeRes(200, { choices: [{ message: { content: 'hi' } }] }); } });
+  assert.deepStrictEqual(await ok.chat([{ role: 'user', content: 'q' }], { reasoningEffort: 'none' }), { ok: true, text: 'hi' });
+  assert.deepStrictEqual([bodies[0].model, bodies[0].models, bodies[0].reasoning_effort], ['a/one:free', ['a/one:free', 'b/two:free', 'c/three:free'], 'none']);
+  const single = createLlm({ baseUrl: 'http://127.0.0.1:11434/v1', model: 'gemma4:latest', apiKey: '', enabled: true, timeoutMs: 1000, redact: makeRedactor([]),
+    fetch: async (u, init) => { bodies.push(JSON.parse(init.body)); return fakeRes(200, { choices: [{ message: { content: 'hi' } }] }); } });
+  await single.chat([{ role: 'user', content: 'q' }]);
+  assert.ok(!('models' in bodies[1]) && bodies[1].model === 'gemma4:latest', 'one model: no models field (Ollama, vLLM)');
+  const limited = createLlm({ baseUrl: 'https://openrouter.ai/api/v1', model: 'a/one:free', apiKey: 'sk-or-test', enabled: true, timeoutMs: 1000, redact: makeRedactor(['sk-or-test']),
+    fetch: async () => fakeRes(429, { error: { code: 429, message: 'a/one:free is temporarily rate-limited upstream (key sk-or-test)' } }) });
+  const r = await limited.chat([{ role: 'user', content: 'q' }]);
+  assert.ok(!r.ok && /^HTTP 429 \(rate-limited/.test(r.error) && /temporarily rate-limited upstream/.test(r.error) && !r.error.includes('sk-or-test'), r.error);
+  const list = (ids) => async () => fakeRes(200, { data: ids.map((id) => ({ id })) });
+  const h = (ids) => createLlm({ baseUrl: 'https://openrouter.ai/api/v1', model: 'a/one:free,b/two:free', apiKey: 'k', enabled: true, timeoutMs: 1000, redact: makeRedactor([]), fetch: list(ids) }).health();
+  assert.deepStrictEqual([(await h(['a/one:free', 'b/two:free'])).detail, (await h(['a/one:free'])).detail],
+    ['all 2 models available', 'not in the server\'s model list: "b/two:free"']);
+});
+test('the bot asks the model not to reason (the whole answer budget goes to the answer)', async () => {
+  let opts;
+  await A.answer('When is Dr Sharma arriving?', deps({ enabled: true, chat: async (m, o) => { opts = o; return { ok: true, text: 'I don\'t have that information.' }; }, health: async () => ({}) }));
+  assert.deepStrictEqual(opts, { reasoningEffort: 'none' });
+});
 test('a model answer naming a flight that is not in the data is rejected', async () => {
   const r = await A.answer('Who is delayed?', deps(okLlm('EK568 and EK999 are delayed.')));
   assert.ok(r.via === 'fallback' && /not in the tracker data/.test(r.error) && /Delayed \(1\)/.test(r.text));
