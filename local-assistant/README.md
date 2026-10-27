@@ -2,7 +2,7 @@
 
 A small Node.js worker that answers coordinators' questions in Telegram, such as "When is Dr Sharma arriving?", "Who is delayed?" or "Which arrivals could share a cab?". It reads the tracker's data from Supabase (the `flights` table), read-only, and uses a language model you choose to word the answer.
 
-**It is optional.** The Apps Script tracker keeps sending every automatic alert (delay, cancellation, diversion, airborne, landed, UNKNOWN, connection risk) whether this worker runs or not. If the worker is stopped, only the conversational replies are unavailable.
+**It is optional.** The tracker keeps sending every automatic alert (delay, cancellation, diversion, airborne, landed, UNKNOWN, connection risk) whether this worker runs or not. If the worker is stopped, only the conversational replies are unavailable.
 
 ## What it does and doesn't do
 
@@ -53,6 +53,8 @@ GEMINI_MODEL=gemini-3.5-flash-lite
 ```
 
 The bot, the dashboard's Flight Assistant and the Smart Cab Plan all switch together; they go through Google's `@google/genai` SDK (`local-assistant/src/llm.js`). `npm run assistant:health` looks the model up by name, so a wrong `GEMINI_MODEL` shows up there. A -lite model answers in seconds; on the free tier the larger flash models took 15-50 s per answer and were often "experiencing high demand" (one automatic retry covers a brief spike). On the free tier Google may use what is sent to improve its products: the bot sends names, flight numbers, statuses and times, never phone numbers or emails. Set `LLM_PROVIDER` blank to go back to the endpoint below.
+
+**OpenRouter (hosted, several free models):** `LLM_PROVIDER` blank, `LLM_BASE_URL=https://openrouter.ai/api/v1`, `LLM_API_KEY` = your OpenRouter key, and `LLM_MODEL` = one model id or several, comma-separated (OpenRouter tries the next when one is rate-limited). Free models and OpenRouter's privacy settings: see the main [README](../README.md#language-model).
 
 **Your own server instead:** any server with an OpenAI-compatible `POST /v1/chat/completions` works. Only `LLM_BASE_URL`, `LLM_MODEL` and, when needed, `LLM_API_KEY` change between setups.
 

@@ -1,6 +1,6 @@
 # Tracking engine (Node.js + Supabase)
 
-The 5-minute tracker without Google: it reads the `Flights` table in Supabase, checks flights with OpenSky, AeroDataBox and (optionally) FlightAware, writes the results back to `Flights`, re-plans the cab groups, sends Telegram alerts and updates the heartbeat in the `status` table.
+The 5-minute tracker without Google: it reads the `Flights` table in Supabase, checks flights with adsb.lol (live positions; OpenSky as a backup, though it refuses Google Cloud addresses), AeroDataBox and (optionally) FlightAware, writes the results back to `Flights`, re-plans the cab groups, sends Telegram alerts and updates the heartbeat in the `status` table. Live positions for the dashboard's map are kept in `tracker_state` (`engine/positions.js`).
 
 ## How it is built
 
@@ -15,6 +15,7 @@ The 5-minute tracker without Google: it reads the `Flights` table in Supabase, c
   - only the changed engine columns of each `Flights` row (`UPDATE … WHERE "ID" = …`; coordinator columns such as Name, Phone or Flight are never written)
   - the cab plan in `groups`, when it changed
   - the heartbeat rows in `status`
+  - the live positions in `tracker_state`, last, so the dashboard never shows a new position next to an old status
 
 ## Setup
 

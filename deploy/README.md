@@ -8,7 +8,7 @@ One always-free Compute Engine VM runs everything:
 | Telegram bot (`local-assistant/`) | pm2 keeps it running |
 | Tracker (`engine/run.js`) | cron, every 5 minutes |
 | Data | Supabase (unchanged) |
-| Language model | Gemini (unchanged, your `GEMINI_API_KEY`) |
+| Language model | Hosted: OpenRouter or Gemini, set in `local-assistant/.env.local-assistant` (see the main [README](../README.md#language-model)) |
 
 This replaces Vercel and cron-job.org. Commands marked **(laptop)** run in PowerShell on your PC; **(VM)** run in the VM's SSH window.
 

@@ -1,286 +1,227 @@
-# Faculty Flight Tracker
+# Faculty Flight Tracker (ITW 2026)
 
-A Google Sheet with a bound Apps Script that:
-- watches visiting faculty flights,
-- alerts coordinators on Telegram and Gmail when a flight is delayed, cancelled, airborne or has landed,
-- groups airport cabs, and re-plans them when flights change.
+Tracks the flights of visiting faculty arriving at and leaving Bengaluru (BLR), and:
 
-It runs on free tiers: AeroDataBox Basic, OpenSky, Telegram, Gmail and Apps Script.
+- alerts coordinators on Telegram when a flight is delayed, cancelled, diverted, airborne or has landed;
+- shows every flight on a password-protected dashboard, with a live map of aircraft positions;
+- suggests shared airport cabs, and re-plans them when flights change;
+- answers coordinators' questions in Telegram ("Who is delayed?", "When does Dr Sharma land?").
 
-- **This README:** getting it running and operating it.
-- **[PROJECT_STATUS.md](PROJECT_STATUS.md):** architecture, design decisions, test coverage, known issues and open tasks.
-- **[AUDIT.md](AUDIT.md):** the AeroDataBox free-tier audit.
+It runs on free tiers: Supabase, one always-free Google Cloud VM, AeroDataBox Basic, adsb.lol and Telegram. The language model is your choice: OpenRouter, Gemini, or a server of your own.
 
-> **Status:** the code is tested locally with all external services faked. It has **not yet been run in a real Apps Script project or against the live APIs**. The first live run is the verification step in the guide below (steps 12–15).
+| Document | What's in it |
+|---|---|
+| **This README** | How the system fits together, day-to-day operation, updating, troubleshooting |
+| [deploy/README.md](deploy/README.md) | Setting up the Google Cloud VM from scratch |
+| [engine/README.md](engine/README.md) | The tracking engine: Supabase tables, local runs, moving off Apps Script |
+| [local-assistant/README.md](local-assistant/README.md) | The Telegram bot: allowed chats, Supabase read access, model servers |
+| [docs/apps-script.md](docs/apps-script.md) | The original Google Sheets / Apps Script version |
+| [PROJECT_STATUS.md](PROJECT_STATUS.md) | Architecture, design decisions, test coverage, known issues |
+| [AUDIT.md](AUDIT.md) | The AeroDataBox free-tier audit |
 
-## Where things live
+## How it runs
 
-| What | Where | Who sets it |
+```
+                        ┌──────────────── Google Cloud VM (e2-micro) ────────────────┐
+  AeroDataBox ─┐        │  cron, every 5 min:  node engine/run.js --scheduled          │
+  adsb.lol ────┼──────► │  pm2:                dashboard  (tools/preview-server.js)    │ ──► Telegram alerts
+  OpenSky ─────┘        │                      telegram-bot (local-assistant/)         │
+                        │  Caddy:              HTTPS + password → dashboard            │ ◄── coordinators' browsers
+                        └──────────────┬──────────────────────────────────────────────┘
+                                       │ reads / writes
+                                       ▼
+                       Supabase: Flights · groups · config · status · tracker_state
+```
+
+| Part | What it does | Code |
 |---|---|---|
-| Secrets: Telegram token, RapidAPI key, optional OpenSky/FlightAware keys | Apps Script → **Project Settings → Script properties** | You, by hand (step 6) |
-| Tunable settings: cab window, seats, alert thresholds, coordinator chat ids/emails, budget options | The **Config** sheet. A blank value means "use the default". Defaults are in `src/Config.js` | You, in the sheet |
-| Plan hard limits: 400 units, 1,600 requests, 1,000 requests/hour | `ADB_PLAN` in `src/AdbClient.js`. Config values can only be lower | Code |
-| Usage counters and suspension state | Script properties `ADB_USAGE_V1*` | The script. Don't edit them |
-| Faculty flights, cab groups, logs | **Flights**, **Groups**, **Log** and **API Usage** sheets | You (Flights) and the script |
-| Every Telegram message and its delivery state | **Telegram Deliveries** sheet, created on the first message | The script. Read it; don't edit it |
-| When the tracker last ran, whether that run worked, and whether its trigger is installed | **Status** sheet (the heartbeat), created by **1. Set up sheets** | The script, on every run. Read it; don't edit it |
+| **Tracker** | Every 5 minutes: checks flights, writes statuses and ETAs to Supabase, re-plans cabs, sends alerts | `engine/` running the decision code in `src/` |
+| **Dashboard** | The web page coordinators use: flights, map, cabs, API usage; add, edit and remove guests | `tools/preview-server.js`, `tools/preview-app.html` |
+| **Telegram bot** | Answers coordinators' questions, read-only | `local-assistant/` |
+| **Supabase** | All data. `Flights` holds one row per guest per direction (arrival, departure) | tables listed below |
 
-Secrets never go in code, in the sheet, in the manifest, or in git. `.env.example` only lists the secret names; Apps Script does not read `.env` files.
+The tracker, the dashboard and the bot are independent. If the bot or the language model is down, alerts and the dashboard keep working. If the dashboard is down, the tracker still runs. Only the tracker sends alerts.
 
-**Moving to Supabase and Vercel:** the table above describes the Apps Script version. A Node.js version of the same tracker runs on Supabase, every 5 minutes from cron on a Google Cloud VM ([deploy/README.md](deploy/README.md)); it uses the same decision code from `src/` and no Google services. See [engine/README.md](engine/README.md) for setup and for the order of the cutover (stop the Apps Script trigger first, so flights are not looked up and alerted twice).
+### Where things live
 
-## Setup guide
+| What | Where |
+|---|---|
+| Guests and their flights | Supabase `Flights`. Coordinator columns (name, flight, times, terminal) are yours; the tracker writes only its own columns (status, ETA, `m:` state) |
+| Cab plan, settings, heartbeat | Supabase `groups`, `config` (blank or missing value = the default in `src/Config.js`), `status` |
+| Tracker state: AeroDataBox usage, request log, live positions, run lock | Supabase `tracker_state` (service-role key only; created by [`engine/schema.sql`](engine/schema.sql)) |
+| Tracker secrets: `SUPABASE_SERVICE_ROLE_KEY`, `ADB_KEY`, `TG_BOT_TOKEN`; optional `FA_KEY` (FlightAware backup), `OPENSKY_CLIENT_ID` and `OPENSKY_CLIENT_SECRET` | `.env.engine` on the VM ([template](.env.engine.example)) |
+| Bot and model settings: `TG_BOT_TOKEN`, `ALLOWED_CHAT_IDS`, Supabase anon key, `LLM_*` / `GEMINI_*` | `local-assistant/.env.local-assistant` on the VM ([template](local-assistant/.env.local-assistant.example)) |
+| Dashboard password | `/etc/caddy/Caddyfile` on the VM (user `coordinator`) |
 
-Each step is marked 🖐 if you do it by hand, or ⚙️ if it's automated or a single command.
+The two env files are git-ignored and never leave the VM and your laptop. The `.example` templates are committed blank, and a pre-commit hook refuses a template with a key in it.
 
-### Prepare your computer (only needed to run tests or deploy with clasp)
+## What the tracker does every 5 minutes
 
-1. 🖐 **Install** [Node.js 18+](https://nodejs.org) and git. Install clasp too if you'll deploy from the command line:
-   ```bash
-   npm install -g @google/clasp
-   ```
-2. ⚙️ **Install dependencies:** there are none. The tests use only Node's built-in modules.
-3. ⚙️ **Check the repository** and run all tests (offline, no API calls):
-   ```bash
-   npm run doctor
-   ```
-   It checks the files, manifest, secret names, `.env.example`, the `.gitignore` rules and that no credentials are in the repository, then runs every test suite. It never makes a network call.
+1. **Live positions, free.** For every guest who is in the air or due to be, it asks **adsb.lol** for the aircraft: once by transponder id and once by callsign, which also finds the flight after a last-minute aircraft swap. If adsb.lol fails it tries **OpenSky**. OpenSky refuses connections from Google Cloud, so from the VM it's only a backup that rarely works.
+   - A fresh position gives a live ETA: "live (ADS-B, 180 km out)".
+   - Seen on the ground within 15 km of BLR: **LANDED**.
+   - adsb.lol depends on volunteers' receivers. India's coast and Bangalore are covered well; the Arabian Sea and the Bay of Bengal hardly at all, so a long-haul flight usually appears in its last 1–2 hours.
+2. **Scheduled status checks.** **AeroDataBox** is asked at set points (6 h before departure, at departure, after the ETA if the landing wasn't seen), within the monthly budget and a cap of 4 lookups per flight. FlightAware is the backup if `FA_KEY` is set.
+3. **Guests on the same flight share it.** Their rows share the aircraft id and callsign; when one is landed, all are.
+4. **Lost flights are closed.** A flight with no update 6 hours after it was due (`ASSUME_LANDED_AFTER_H`) is marked LANDED or DEPARTED with the ETA source "assumed … not confirmed". The dashboard tags it **! NOT CONFIRMED** and coordinators get an ℹ️ message asking them to check.
+5. **Alerts.** A status change, or an ETA that moves 15 minutes or more, goes to the coordinators on Telegram. The landing message names the cab.
+6. **Cabs.** Guests on the same direction and terminal within 45 minutes of each other share a cab, up to `MAX_SEATS` (default 4). Arrival pickup is the ETA + 40 min. Suggestions only: nothing is booked.
+7. **Saving.** AeroDataBox usage first, then the changed flight rows, cab groups, heartbeat, and the positions last (so the dashboard never shows a new position next to an old status).
 
-### Create the spreadsheet and script
+Dry run, same thing without writing (it still calls the flight APIs):
+```bash
+npm run tracker:dry-run
+```
 
-4. 🖐 **Create a Google Sheet,** then open **Extensions → Apps Script** from inside it. The script must be *bound* to the sheet: the usage counter relies on the sheet's document lock, and without it AeroDataBox lookups stay off.
-5. **Load the code.** Choose one way:
-   - 🖐 **By hand:**
-     - In the Apps Script editor, go to Project Settings and tick **Show "appsscript.json" manifest file in editor**.
-     - Replace the manifest's contents with `src/appsscript.json`.
-     - Create one script file per `src/*.js` file, with the same name, and paste each file's contents in.
-   - ⚙️ **With clasp:**
-     1. Turn on the Apps Script API at https://script.google.com/home/usersettings.
-     2. Copy the **Script ID** from Apps Script → Project Settings.
-     3. Run these commands:
-        ```bash
-        cp .clasp.json.example .clasp.json
-        ```
-        Edit `.clasp.json` and paste the Script ID in place of the placeholder. Then:
-        ```bash
-        clasp login
-        ```
-        ```bash
-        clasp push
-        ```
-     4. If clasp asks whether to overwrite the manifest, answer **yes**.
+## The dashboard
 
-     Don't use `clasp create`: it makes a new project and can overwrite `src/appsscript.json`. `.clasp.json` is git-ignored on purpose, because it points at *your* project; each developer makes their own from the example.
-6. 🖐 **Add the secrets.** In Apps Script, go to **Project Settings → Script properties → Add script property**, enter the exact name and paste the value, then **Save**. Paste values without spaces.
+`https://<your-vm-ip-with-dashes>.sslip.io`, user `coordinator`. It refreshes every 5 minutes, and at once when you come back to the tab.
 
-   | Property | Needed | How to get it |
-   |---|---|---|
-   | `TG_BOT_TOKEN` | **Required** | Step 7 |
-   | `ADB_KEY` | **Required** | Step 8 |
-   | `OPENSKY_CLIENT_ID` and `OPENSKY_CLIENT_SECRET` | Optional, set both or neither | opensky-network.org → Account → API client. Without them OpenSky is used anonymously, limited to 400 credits/day |
-   | `FA_KEY` | Optional | flightaware.com/aeroapi → Personal plan. Used only as a backup when AeroDataBox fails or is out of budget |
+| Page | What's there |
+|---|---|
+| **Overview** | Counts, next arrival, operations attention, **Tick Engine Activity** (what the tracker did and sent), guest list |
+| **Flights** | One card per guest, grouped by section (inbound, departures, completed) and then by date. Filters: arrivals, departures, airborne, delayed, landed, cancelled, unknown. A filter shows the leg that matches, so a guest whose arrival landed still appears under **Landed**. The **map** shows each aircraft adsb.lol can see, with a dashed line to BLR |
+| **Cab Suggestions** | The suggested cabs, with dates, and **Picked up** marks |
+| **Notifications** | Not filled from Supabase yet (empty on the live dashboard); the Overview's Tick Engine Activity has the same messages |
+| **API Usage** | AeroDataBox budget, live positions (adsb.lol), Telegram delivery, every recent request |
+| **Settings** | The current settings (read-only; change them in the Supabase `config` table) |
 
-7. 🖐 **Telegram bot.**
-   1. In Telegram, open **@BotFather** (check for the blue verified tick), send `/newbot`, and choose a display name and a username ending in `bot`.
-   2. BotFather replies with a token shaped like `digits:letters`. Copy it straight into the `TG_BOT_TOKEN` script property (step 6). Never paste it into the sheet, a chat, an email, the code or git.
-   3. Optional: send `/setjoingroups` → **Disable** to BotFather after adding the bot to any coordinator group, so nobody else can add it to theirs.
-   4. If the token ever leaks, send `/revoke` to BotFather, then replace the property value with the new token. Nothing else changes: chat ids stay the same.
+**Actions:**
+- **Add guest** (header): one flight per entry: name, flight number, direction, date and scheduled time in IST.
+- **Edit** and **Remove** on each card.
+- **Run Tracker Now** (sidebar): one run straight away instead of waiting for cron.
+- **Flight Assistant**: questions about the flights, answered by the language model, or from the tracker data when the model is unavailable.
+- **Smart Cab Plan**: the model suggests cabs. If it fails, you get the rule-based plan.
 
-   This bot only sends messages. It doesn't set a webhook and it doesn't poll. If you reuse a bot that another program already serves through a webhook, alerts still work, but **Show Telegram chat ids** can't read its messages (see Troubleshooting).
-8. 🖐 **AeroDataBox key.**
-   1. Open https://rapid.aerodatabox.com, sign in to RapidAPI, and subscribe to the **Basic (free)** plan.
-   2. Copy the **X-RapidAPI-Key**, shown in the code snippets on any endpoint page. Put it into the `ADB_KEY` property.
-   3. On your RapidAPI dashboard, note the day your quota resets; it's needed for `ADB_BILLING_CYCLE_DAY` later.
+**Force check** (look one flight up now) is disabled in this dashboard; **Run Tracker Now** covers most needs.
 
-### Initialise and verify
+Run it on your laptop against the real data:
+```bash
+npm run preview
+```
+It needs `local-assistant/.env.local-assistant`, plus `.env.engine` for the editing actions. Open `http://localhost:3000`; add `?mock=1` for sample data.
 
-9. ⚙️ **Set up the sheets.** Reload the spreadsheet, then choose **Flight Tracker → 1. Set up sheets**. Apps Script asks for permission the first time.
+## Telegram
 
-   This creates or updates the Flights, Config, Groups, Log, API Usage, Status and About sheets, and sets the timezone to Asia/Kolkata. On the Config sheet it adds any settings the sheet lacks and refreshes the notes, but **it never changes a value you set**.
-10. 🖐 **Coordinators.**
-    1. Each coordinator opens the bot in Telegram (search for its username) and sends `/start`. A bot can't message anyone who hasn't done this, and it can't look people up: they must write to it first. For a group chat, add the bot to the group and send `/start@YourBotName`.
-    2. Within 24 hours (Telegram keeps these messages only that long), run **Show Telegram chat ids**. It lists each chat's id, type and name, and marks the ones that are already coordinators. Reading the list doesn't use up or change anything.
-    3. Copy each coordinator's id into `COORD_TG_CHAT_IDS` on the Config sheet, separated by commas. Prefer **private** chats (positive ids).
-       - A **group** id starts with `-`. Every member of that group receives faculty names, flights and cab plans, and Check setup warns about it.
-       - `@usernames` and anything that isn't a number are refused, so a public channel can't be configured by accident.
-    4. Put email addresses into `COORD_EMAILS`.
+**Alerts** come from the tracker, to the chat ids in `COORD_TG_CHAT_IDS` (Supabase `config`). Each run's alerts go out as one message per chat. A temporary Telegram failure is retried on later runs (after 5, 10 and 20 minutes); a message not delivered within 2 hours is dropped as out of date. The same text to the same chat within 2 hours is sent only once, so a lasting problem alerts every 2 hours, not every 5 minutes.
 
-    **Who receives what.** Only the chat ids on the Config sheet receive coordinator alerts, so anyone who can edit the sheet controls the list: share edit access only with coordinators. Drivers get messages only if their private chat id is on the **Groups** sheet. Faculty get messages only if `NOTIFY_FACULTY` is on and their private chat id (or email) is on **Flights**. A group id in a driver or faculty cell is refused, and the person is emailed instead if they have an address. The script never adds a recipient by itself.
-11. ⚙️ **Check the setup:** run **Flight Tracker → 2. Check setup (no API calls)**. It reports:
-    - missing or odd-looking secrets (never their values),
-    - Config problems,
-    - missing coordinators,
-    - sheet headers and timezone,
-    - whether the document lock and Script Properties work,
-    - trigger state, AeroDataBox usage, and recent Telegram delivery problems.
+**The bot** answers chats in `ALLOWED_CHAT_IDS` (in `local-assistant/.env.local-assistant`). Anyone else who writes privately is told their own chat id, which is how you find coordinators' ids.
 
-    It sends nothing to any external API. Fix every ❌ line before going on.
+| Command | Answer |
+|---|---|
+| `/flight EK568` (or a surname) | That flight's status, ETA and cab |
+| `/delayed` | Every delayed flight |
+| `/cabs` | The cab suggestions |
+| `/status` | When the tracker last ran |
+| `/help` | The list above |
+| Any other question | Answered by the language model, from the tracker data only |
 
-    Then run **Check Telegram bot (sends nothing)**. It tells apart a missing token, a rejected token and a network problem, says whether a webhook is set, and checks every coordinator chat id with Telegram (private chat, group or public) **without sending a message**.
-12. ⚙️ **Send a test alert** with **Send test alert**. It shows what happened for each recipient: ✅ delivered, ⏳ will retry, or ❌ with the reason. Each coordinator should get it on Telegram and by email. Every Telegram attempt is recorded on the **Telegram Deliveries** sheet, with tokens masked.
-13. ⚙️ **Test a flight lookup** with **Test a flight lookup (uses 2 AeroDataBox units)**.
-    1. Enter a real flight and date, e.g. `EK568 2026-10-21`.
-    2. It shows your current usage and asks before sending.
-    3. The request goes through the same budgeted gateway as tracking, and appears on **API Usage**.
+The commands work without the language model. If the model is down, flight and "who is delayed" questions are still answered from the data, and other questions get "temporarily unavailable".
 
-    This is the only setup step that uses quota.
-14. 🖐 **Add flights.** Add a tab named `Import`, paste the travel-details spreadsheet into it with headers in row 1, and run **3. Import from "Import" tab**. Or type rows straight into **Flights** (see below).
+## Language model
 
-    **Changes after the first import.** The tracker reads only the **Flights** tab. Editing the Import tab changes nothing until you run **3. Import from "Import" tab** again (or make the same edit on Flights directly). A re-import:
-    - adds people and flights that are new;
-    - lists every changed scheduled time or terminal on rows already in Flights, for example "Row F12 Dr X arrival: Sched Arr 2026-10-25 04:50 → 06:10", and asks before writing them. It writes only your green columns; the tracker then re-checks those rows. A blank or unreadable Import value never blanks a Flights cell;
-    - lists a probable flight-number change ("Possible flight change: Dr Y arrival EK568 (row F7, active) vs EK566 in Import"). It adds the new flight but never deactivates the old one: untick **Active** on the old row yourself;
-    - ends with a count of rows added, updated, unchanged and possible flight changes.
-15. ⚙️ **Start tracking** with **4. Start tracking (every 5 min)**. **Stop tracking** removes the trigger.
+The bot, the dashboard's Flight Assistant and the Smart Cab Plan all use the model set in `local-assistant/.env.local-assistant`. Change it, then `pm2 restart all` and `npm run assistant:health`.
 
-    Run **Check setup** again: it should show one trigger. Then watch:
-    - **Status:** `LAST_TICK_AT` should move every 5 minutes and `LAST_TICK_RESULT` read `ok`. The dashboard, the local preview and the Telegram assistant warn when it is more than 15 minutes old, failed, or the trigger is missing,
-    - **Log:** every check and alert,
-    - **API Usage:** every AeroDataBox request, with running totals,
-    - **Show API usage:** the current window.
+**OpenRouter** (many models, several free):
+```
+LLM_PROVIDER=
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_MODEL=google/gemma-4-31b-it:free,nvidia/nemotron-3-super-120b-a12b:free,google/gemma-4-26b-a4b-it:free
+LLM_API_KEY=<your OpenRouter key>
+```
+- **List several models,** comma-separated: the first is asked, and OpenRouter tries the next when one is rate-limited or down.
+- **Use the model id** from the model's page (`google/gemma-4-31b-it:free`), not its URL. Pick general "instruct" models that support structured output (JSON); not embedding, coding-agent or speech models.
+- **Privacy settings decide which free models work.** At openrouter.ai/settings/privacy, Zero Data Retention or a blocked "free endpoints that train on request data" makes free models answer **HTTP 404 "Provider returned error"** (the Eligibility Preview lists them as unavailable). Allowing training means the provider may keep what the bot sends: guest names, flights and times. If that's not acceptable, keep the restrictions and use a cheap paid model that supports Zero Data Retention.
+- **Free limits:** HTTP 429 means rate-limited. An account without credit gets only a small daily allowance of free requests; $10 of credit raises it a lot.
 
-### Checking flights on demand
+**Gemini:** `LLM_PROVIDER=gemini`, `GEMINI_API_KEY`, `GEMINI_MODEL` (default `gemini-3.5-flash-lite`). The larger flash models are often "busy" (HTTP 503) on the free tier.
 
-- **Run a check now** runs the tracker once, exactly like the 5-minute trigger: only rows that are *due* are looked up (for example at T-6 h). It then reports what it did: "Check finished at 14:05 IST: 2 provider lookups due, 2 requests made, 1 row updated, 1 alert sent." "0 due" is normal between checkpoints.
-- **Force check a flight now (uses AeroDataBox units)** looks chosen rows up immediately, even if they are not due:
-  1. Enter one or more row IDs from the Flights **ID** column, comma-separated (`F12, F15`).
-  2. Confirm: the dialog shows the rows, the estimated AeroDataBox units (2 per lookup; 0 if a recent answer is cached) and each row's remaining per-flight calls (`MAX_ADB_CALLS_PER_FLIGHT`, default 4).
-  3. A summary shows each row's result and its new status and time.
+**Your own server** (Ollama, vLLM, a university DGX): `LLM_PROVIDER=` blank, and set `LLM_BASE_URL`, `LLM_MODEL` and, if needed, `LLM_API_KEY`. See [local-assistant/README.md](local-assistant/README.md).
 
-  Forced lookups use the same budget, cache and per-flight cap as tracking. A row at its cap, already finished (landed, departed, cancelled, diverted), inactive or with an unreadable flight number is refused without a request.
-- If another check is running, both items say **"A check is already running; try again in a minute."** Nothing is queued or skipped silently.
+Only one provider is active at a time. In `.env.local-assistant` the **last** line for a setting wins, so a block appended at the end overrides the lines above it.
 
-### Dashboard (optional)
+## Day to day
 
-The Overview dashboard is a read-only web page that shows flights, cab groups, alerts, recent Log rows and AeroDataBox usage. It never calls a flight API, sends a message or changes the sheet.
+**Adding guests:**
+- One at a time: **Add guest** on the dashboard.
+- The whole list, from the Google Forms "Form Responses" export (.xlsx). On your laptop, with `.env.engine`:
+  ```bash
+  npm run import:guests -- "C:\path\to\responses.xlsx"
+  ```
+  That's a dry run: it lists every guest it would add or change, and every cell it couldn't read, and writes nothing. Check it, then write it:
+  ```bash
+  npm run import:guests -- "C:\path\to\responses.xlsx" --apply
+  ```
+  It matches people by name, never deletes, and never blanks a value with an empty cell. Guests in Supabase but missing from the file keep being tracked; the report lists them.
 
-1. 🖐 In Apps Script, choose **Deploy → New deployment**, pick type **Web app**, then:
-   - **Execute as:** Me.
-   - **Who has access:** Only myself (the default in `src/appsscript.json`).
-   - Choose **Deploy** and approve.
-2. ⚙️ In the sheet, **Flight Tracker → Open dashboard** shows the link.
-   - After a code change, choose **Deploy → Manage deployments → Edit → New version**, or the link keeps serving the old code.
-3. **Sharing:** the page runs as you, so anyone you give access to sees faculty names, flights and drivers. Widen access only on purpose, for example **Anyone within your domain** on Workspace.
-4. **Theme:** light by default; the moon icon switches to dark, and the choice is remembered in that browser.
-5. **Freshness:** under the title, "Tracker last ran HH:MM IST (N min ago)" comes from the **Status** sheet. A red banner appears when that is more than 15 minutes ago, the last run failed, or the trigger isn't installed.
-6. **Force check:** each active flight has a **Force check** button. It shows the same confirmation as the menu item and uses the same lock and budget. This is the dashboard's only action that calls a provider, and only after you confirm.
+**Checking that everything runs** (on the VM):
 
-The Flight Assistant panel isn't connected to any AI service yet, so it sends nothing anywhere.
+| Command | Shows |
+|---|---|
+| `pm2 status` | The dashboard and the bot are `online` |
+| `journalctl -t flight-tracker -n 50` | The last tracker runs |
+| `npm run assistant:health` | Telegram, Supabase and the language model, without sending anything |
+| `pm2 logs --nostream --lines 50` | The dashboard's and the bot's recent output |
+| `npm run tracker:usage` | AeroDataBox usage in the current window |
 
-### Flights sheet
+The dashboard header says "Tracker last ran HH:MM IST (N min ago)". A red banner means more than 15 minutes, or the last run failed.
 
-Green columns are yours. Blue columns are written by the script. Hidden `m:` columns are its state, so don't insert or reorder columns.
+## Updating the VM
 
-- **Direction:** Arrival (into BLR) or Departure (out of BLR).
-- **Flight:** any of `EK 568`, `ek-0568`, `UAE568` or `Emirates 568`. All become `EK568`.
-- **Sched Arr (IST):** required for arrivals.
-- **Sched Dep (IST):** required for departures, optional for arrivals. Filling it saves an AeroDataBox call. Always enter times in IST.
-- **First Leg Flight:** optional, for connections. One check warns if the first leg lands less than 60 min before the onward flight.
-- **Active:** untick to stop tracking a row. Editing a row's flight or times resets its tracking state.
-- **Personal data:** keep it to name, phone, email/Telegram id and flight. No passport details.
+Push from your laptop (`P:\Flight Tracker`):
+```bash
+git push origin main
+```
+Then on the VM:
+```bash
+cd ~/flight-tracker && git pull && pm2 restart all
+```
+- The tracker needs no restart: cron starts a fresh run every 5 minutes.
+- After `git pull`, `git log --oneline -1` shows the commit the VM is running.
+- If `package.json` changed, run `npm ci --omit=dev` before the restart.
+- Edit a settings file on the VM with `nano`, for example `nano ~/flight-tracker/local-assistant/.env.local-assistant` (save `Ctrl+O`, `Enter`; exit `Ctrl+X`; paste with right-click). Then `pm2 restart all`.
 
-**Cabs:** people on the same direction, airport and terminal share a cab when they're within `GROUP_WINDOW_MIN` (45 min) of the first person, up to `MAX_SEATS`. Arrival pickup is the last ETA + 40 min. Departure pickup is the earliest check-in − 90 min. A driver typed on **Groups** follows their group when it's re-planned.
+## Free tiers and their limits
 
-## Asking questions in Telegram (optional local assistant)
-
-[`local-assistant/`](local-assistant/README.md) is a separate Node.js worker. It answers coordinators' questions in Telegram ("Who is delayed?", "Where is EK568 right now?") from the sheet, read-only, using a language model you choose: local Ollama, a LAN machine, or a university DGX. It runs on a computer you control, not in Apps Script.
-
-- If it stops, every automatic alert still goes out; only the question answering pauses.
-- `/status` shows when the tracker last ran. If that is more than 15 minutes ago, failed, or there is no **Status** sheet, every answer ends with a note such as "Note: the tracker hasn't updated since 14:05 IST; times may be stale."
-- Setup, the DGX notes and the health check are in [local-assistant/README.md](local-assistant/README.md).
-
-## Local preview dashboard (optional)
-
-`npm run preview` serves a richer copy of the dashboard on `http://localhost:3000`. It reads the tracker data from Supabase with the local assistant's anon key (`SUPABASE_URL`, `SUPABASE_ANON_KEY`), so set up `local-assistant/` first.
-
-- **Same data as the Telegram assistant.** By default (`PREVIEW_SOURCE=flights` in `local-assistant/.env.local-assistant`) it reads the Supabase `flights` table (plus `groups`, `config` and `status` tables if they exist): live statuses, ETAs, cab groups and the heartbeat. The header shows the source: "Data: Supabase · flights table (tracked) · Tracker last ran …".
-- **Import fallback.** If the `flights` table is empty or holds the Import tab's columns rather than the tracker's, the preview shows those schedules instead and says so in a banner: "flights table empty or without the tracker's columns: showing Import-column schedules only, no live status". `PREVIEW_SOURCE=import` always reads the Import columns (schedules only, every status SCHEDULED).
-- **Refresh.** The page refreshes itself every 5 minutes from a 1-minute server cache. The refresh buttons read the sheet again at once (at most once every 5 seconds).
-- **Two write actions, both done by the preview server so no key reaches the browser.**
-  - **Add guest** (header) inserts one row into the Supabase `Flights` table with the anon key (it needs an anon INSERT policy). The form asks for name, flight number, direction, date and scheduled time (IST); the tracker can't follow a flight without a time. The row gets the next free `F…` ID, and the list refreshes.
-  - **Run Tracker Now** (sidebar, under the engine status) starts one tracking-engine run (`node engine/run.js`, so it needs `.env.engine` with the service-role key; see [engine/README.md](engine/README.md)). The button stays disabled until the run ends and the `status` table shows its heartbeat; then the data refreshes.
-- The per-flight **Force check** button is still disabled in the preview.
-- `?mock=1` shows built-in sample data without touching the sheet.
-
-## Telegram alerts: how delivery works
-
-- **One message per tick.** All coordinator alerts from one 5-minute check are combined into one Telegram message per chat, plus one email. Drivers and faculty get their own messages.
-- **Plain text.** Messages are sent without Markdown/HTML formatting, so names and symbols arrive exactly as typed. Each message ends with the AeroDataBox attribution line.
-- **Long messages are split, never cut.** Anything over Telegram's 4,096-character limit is split at paragraph breaks into numbered parts, `(1/2)`, `(2/2)`, each with the attribution.
-- **Repeats are suppressed.** A text identical to one in the same recipient's previous alert from the last 120 minutes isn't sent again. A persistent error therefore alerts about every 2 hours, not every 5 minutes. A real change back (plan A → B → A) is still sent. **Send current cab plan** and **Send test alert** always send.
-- **Delivery record.** Each message × recipient is a row on **Telegram Deliveries**: queued time, delivery id, role, chat id, state, attempts, last attempt, delivered time, Telegram's message id, a token-free error, and the text. Rows older than `ADB_RETENTION_HOURS` (156 h) are deleted, like Log rows.
-
-| State | Meaning | Retried? |
+| Service | Limit | When it runs out |
 |---|---|---|
-| `SENT` | Telegram confirmed delivery | — |
-| `RETRY` | Temporary problem: rate limit (429), Telegram server error (5xx), or a network error | Yes, next ticks: after 5, then 10, then 20 min; 4 attempts in all |
-| `FAILED` | Permanent for that chat (wrong id, bot blocked, never `/start`ed, rejected message), the token is missing or rejected, or 4 attempts failed | No |
-| `UNCONFIRMED` | Telegram may have delivered it, but didn't confirm (two network errors, or an unreadable answer) | No, to avoid a duplicate |
-| `EXPIRED` | Not delivered within 120 min; old flight news would mislead | No |
+| **AeroDataBox** Basic | 400 units and 1,600 requests per billing cycle; 2 units per lookup; 1 request/s | Live positions keep working; flights due a check show **UNKNOWN** with an alert, never "on time" |
+| **adsb.lol** | Free, no key. Requires a User-Agent with contact details (the tracker sends one); data under the ODbL licence, credited on the map | — |
+| **OpenSky** | Blocks Google Cloud addresses | Backup only |
+| **OpenRouter** free models | Per-minute and per-day request limits | The bot and dashboard answer from the tracker data |
+| **Gemini** free tier | Per-minute limits; flash models often busy | Same |
+| **Google Cloud** e2-micro | Always free in us-central1, us-west1, us-east1; the public IP may cost a little | — |
 
-- **Rate limits.** The script sends at most about one message per second to the same chat. If Telegram answers 429 with `retry_after` of 3 s or less, it waits once and resends. A longer `retry_after` is respected by waiting for a later tick, never by holding up the 5-minute check. Telegram work is capped at about 20 s per run; anything left goes out next tick.
-- **A bad token stops sending at once**, rather than failing once per chat. Fix `TG_BOT_TOKEN`, then use **Check Telegram bot**.
-- **Possible duplicates.** If a request times out, Telegram may have delivered the message anyway. It's retried once, so a coordinator can occasionally see the same alert twice. After that it's marked `UNCONFIRMED` and not retried.
-- **Email** has no delivery receipt and isn't retried. If Gmail refuses a message, that appears on **Log**. Email is the backup channel if Telegram is down.
-
-## AeroDataBox free tier: what you need to know
-
-- **Limits:** 400 API units and 1,600 requests per billing cycle, 1 request/second, and 1,000/hour. The only endpoint used, Flight Status, costs **2 units**. The script never sends a request that would exceed a limit.
-- **Accounting window:**
-  - **Default (blank `ADB_BILLING_CYCLE_DAY`):** a safe rolling 33-day window, correct whatever your reset day is. It allows about 365 units per 30 days.
-  - **Set to the dashboard's reset day (1–31):** counting resets on that day instead, giving the full 400. A sheet from an earlier version may still say `1`; Check setup warns about that.
-- **When the budget runs out:** OpenSky keeps tracking airborne flights, FlightAware is used if configured, and flights due a check show **UNKNOWN** with an alert. They are never shown as on time.
-- **Capacity:** about 60–90 visits a month (one arrival plus one departure each) in rolling mode, or 65–100 with the reset day set. In the worst case, with failures and missing departure times, it's about 20.
-- **Sync usage from RapidAPI dashboard:**
-  - Whole numbers only; a blank answer changes nothing.
-  - Lowering the local count asks for a second confirmation.
-  - Requests still in flight are kept.
-- **Resume AeroDataBox:** clears a bad-key or rate-limit stop. Clearing a stop that AeroDataBox itself reported ("quota used up") needs an extra confirmation, and the override is recorded on API Usage.
-- **Terms:** non-commercial use only, attribution required (added to every message and the About sheet), and provider data deleted after 156 h (the limit is 7 days).
-- **Still to confirm:** the attribution wording, whether a university's internal use counts as non-commercial, and whether error responses are billed. See [AUDIT.md](AUDIT.md).
+AeroDataBox terms: non-commercial use, attribution on every alert (added automatically), and provider data deleted after 156 hours. See [AUDIT.md](AUDIT.md).
 
 ## Troubleshooting
 
-| Symptom | Fix |
+| Symptom | Cause and fix |
 |---|---|
-| No **Flight Tracker** menu | Reload the sheet. The script must be opened from this sheet's Extensions menu (bound) |
-| Banner "The tracker has not run for …" / Telegram note "the tracker hasn't updated since …" | The trigger stopped or keeps failing. Read `LAST_TICK_ERROR` on **Status** and the **Log**; run **Check setup**, then **4. Start tracking** if the trigger is missing. "No heartbeat" means **1. Set up sheets** and a first run haven't happened yet |
-| Local preview says "showing Import-column schedules only" | The Supabase `flights` table is empty (row-level security with no SELECT policy for anon looks the same) or lacks the tracker's columns. Or check `PREVIEW_SOURCE` in `local-assistant/.env.local-assistant` |
-| "Authorization required" | Run any menu item and approve. The scopes are in `src/appsscript.json` |
-| Check setup: ❌ Document lock | The script is standalone, not bound. Recreate it from the sheet (step 4) |
-| Check setup: ❌ `ADB_KEY` / `TG_BOT_TOKEN` | Add the property with the exact name (step 6). ⚠️ "spaces" or "does not look like" means re-paste the value |
-| Telegram "TG_BOT_TOKEN rejected" (HTTP 401/404) | Token wrong or revoked. Paste the current token from @BotFather into `TG_BOT_TOKEN`, then run **Check Telegram bot** |
-| Telegram "TG_BOT_TOKEN is not set" | Add the `TG_BOT_TOKEN` script property (step 6). Email alerts still go out meanwhile |
-| Telegram "HTTP 403 … blocked the bot or never sent it /start" | That person must open the bot and send `/start` (or unblock it). For a group, re-add the bot |
-| Telegram "HTTP 400 … wrong chat id" | Fix the id on Config / Groups / Flights using **Show Telegram chat ids**. **Check Telegram bot** tests every coordinator id without sending |
-| Telegram "the group became a supergroup; its new chat id is …" | Replace the old id with the new one shown |
-| Many `RETRY` / `EXPIRED` rows on Telegram Deliveries | Telegram was unreachable or rate-limited. They retry by themselves; email covered the alerts. Check the Log for the reason |
-| `UNCONFIRMED` rows | A network error hid the outcome. Check with the recipient; the script won't resend, to avoid duplicates |
-| "Telegram Deliveries sheet unavailable" (ERROR in Log) | The sheet is protected or was broken. Messages still go out once, but without retries. Remove the protection or delete the sheet (it's recreated) |
-| "Show Telegram chat ids" says no messages | Ask people to send `/start` first. In groups, send `/start@YourBotName`. Telegram keeps these for 24 h only, so run it soon after |
-| "Show Telegram chat ids": "Another program is reading this bot's messages" (HTTP 409), or an empty list while the local assistant runs | The [local assistant](local-assistant/README.md) or a webhook reads the bot's messages. Alerts still work. With the assistant, have the person message the bot: it replies with their chat id. Otherwise ask the webhook's owner, or use a separate bot. Don't delete someone else's webhook |
-| The same alert arrived twice | A timeout hid a successful delivery and the one retry resent it (state `UNCONFIRMED` or `SENT` with 2 attempts). Expected, and rare |
-| No emails | Check `COORD_EMAILS` and `EMAIL_ALERTS`. Consumer Gmail allows 100 emails a day |
-| Flight shows **UNKNOWN**, "lookup not performed" | AeroDataBox is out of budget or suspended. Run **Show API usage** |
-| Flight shows **UNKNOWN**, "IDENTITY MISMATCH" / "could not tell which flight is meant" | The provider lists this flight number at times that don't match the row (or twice, about equally close). Check the date and that Sched Arr/Dep is in **IST**, then correct the row. Nothing was guessed |
-| "Connection not checked" | The first-leg check couldn't give a verdict (lookup failed twice, flight not found on either date, or the request cap was reached). Check the connection by hand |
-| "AeroDataBox HTTP 401/403" | Key wrong or not subscribed. Fix `ADB_KEY`, then **Resume AeroDataBox** |
-| "usage store unavailable" | Lookups stopped deliberately (fail closed). Use **Sync usage from RapidAPI dashboard** with the dashboard figures |
-| "Flights sheet column N should be …" | A column was inserted or moved. Undo it; put notes in the Notes column |
-| Times off by hours | Run **Set up sheets** (sets the timezone to Asia/Kolkata) and enter times in IST |
-| `clasp push`: "User has not enabled the Apps Script API" | Turn it on at https://script.google.com/home/usersettings |
+| Red banner "The tracker has not run for …" | First click the refresh button (a tab left in the background showed old data before this was fixed). If it stays: `journalctl -t flight-tracker -n 50` on the VM, and `crontab -l` to check the cron line |
+| A flight has no position, map empty | adsb.lol can't see the aircraft yet (over the sea, or not departed). It appears near the coast. API Usage → Live positions shows whether the calls themselves work |
+| Activity shows `adsb.lol: HTTP 403` | The VM runs code older than the User-Agent fix: update the VM |
+| `OpenSky: UND_ERR_CONNECT_TIMEOUT` | Expected from Google Cloud; only shown when adsb.lol also failed |
+| Bot replies "language model is temporarily unavailable" | `pm2 logs --nostream --lines 50 \| grep "via fallback"` shows the model's error. **429**: rate-limited. **404 "Provider returned error"**: OpenRouter privacy settings (above). **401**: wrong `LLM_API_KEY`. **503**: Gemini busy |
+| Health check: model "a,b,c" not in the server's model list | The VM runs code older than model lists: update the VM |
+| A flight stuck "airborne" long after its ETA | Six hours after the ETA it's closed as "! NOT CONFIRMED". Or **Edit** it on the dashboard |
+| Two guests on one flight show different statuses | The next run aligns them (rows on the same flight share their landing) |
+| A landed guest is missing under **Landed** | Their card shows the next leg; the Landed filter finds them since the "leg that matches" change. Update the VM |
+| `cd: … .env.local-assistant: Not a directory` or `Permission denied` | It's a file: open it with `nano <path>` |
+| `npm error Missing script` | Two commands pasted onto one line; run them separately |
+| Telegram 409 "another program is reading this bot's messages" | Only one copy of the bot may run: stop the one on your laptop |
+| Dashboard asks for a password and refuses it | The password is the one hashed into `/etc/caddy/Caddyfile`; make a new hash with `caddy hash-password` and `sudo systemctl reload caddy` |
 
 ## Development
 
 ```bash
 npm test
 ```
-
 ```bash
 npm run doctor
 ```
-
-- **`npm test`** runs every suite under `test/`, plus the local assistant's (`local-assistant/test/`). Every external service is faked.
-- **`npm run doctor`** adds the repository checks.
-- **Isolation:** every external service is faked, and the application code runs in a sandbox with no access to environment variables, so a key on your machine can never trigger a real request.
-- **Structure and where to start:** see [PROJECT_STATUS.md](PROJECT_STATUS.md).
+- `npm test` runs every test suite. Every external service (Supabase, AeroDataBox, adsb.lol, OpenSky, Telegram, the language models) is faked: no test makes a network call or needs a key.
+- `npm run doctor` also checks the repository: files, the env templates, `.gitignore`, and that no credentials are committed.
+- **Shared decision code:** the tracker logic in `src/` is the Apps Script code, run unchanged by the Node engine in a sandbox (`engine/core.js`). Changing a rule there changes both versions.
+- **Branches:** work on a branch, fast-forward `main`, and push to GitHub yourself; the VM pulls from `main`.
+- Structure and where to start: [PROJECT_STATUS.md](PROJECT_STATUS.md).
